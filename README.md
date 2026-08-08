@@ -36,15 +36,22 @@ Sources/CodexStatusBar/
 
 不依赖 Xcode 或第三方库。
 
+## 快速安装
+
+从 [v0.1.0 Release](https://github.com/Universeeeeeee/codex-status-bar/releases/tag/v0.1.0) 下载 `Codex Status.zip`，解压后将 `Codex Status.app` 拖到“应用程序”文件夹并打开。
+
+应用为个人使用的临时签名版本。首次打开若被 macOS 拦截，请在 Finder 中按住 Control 点击应用并选择“打开”，或前往“系统设置 -> 隐私与安全性”确认打开。
+
 ## 构建与运行
 
 ```bash
 make test
 make app
+make archive
 make run
 ```
 
-构建产物位于 `outputs/Codex Status.app`。应用使用本地临时签名，适合个人使用和本地分发。
+构建产物位于 `outputs/Codex Status.app`；`make archive` 生成可分发的 `outputs/Codex Status.zip`。应用使用本地临时签名，适合个人使用和本地分发。
 
 ## 诊断
 
