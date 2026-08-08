@@ -73,4 +73,4 @@ The utility reads the local thread index and lifecycle events under `~/.codex`, 
 
 ## License
 
-No license has been selected yet. Add one before publishing a public repository.
+This project is licensed under the [MIT License](LICENSE). Commercial use, modification, and redistribution are permitted, provided that copies or substantial portions retain the copyright and license notice.
