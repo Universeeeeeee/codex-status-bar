@@ -38,7 +38,7 @@ Xcode and third-party libraries are not required.
 
 ## Quick Install
 
-Download `Codex Status.zip` from the [v0.1.0 Release](https://github.com/Universeeeeeee/codex-status-bar/releases/tag/v0.1.0), unzip it, then move `Codex Status.app` to Applications and open it.
+Download `Codex.Status.zip` from the [v0.1.0 Release](https://github.com/Universeeeeeee/codex-status-bar/releases/tag/v0.1.0), unzip it, then move `Codex Status.app` to Applications and open it.
 
 The app is ad-hoc signed for personal use. If macOS blocks the first launch, Control-click the app in Finder and choose Open, or approve it in System Settings > Privacy & Security.
 
