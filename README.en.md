@@ -2,7 +2,7 @@
 
 [中文](README.md)
 
-A native macOS menu bar utility for monitoring local Codex task activity and the weekly quota.
+A native macOS menu bar utility for monitoring local Codex task activity, the five-hour quota, and the weekly quota.
 
 > This is an independent local utility, not an official OpenAI product.
 
@@ -13,7 +13,7 @@ A native macOS menu bar utility for monitoring local Codex task activity and the
 - Keeps completed tasks for ten minutes, then removes idle tasks after five hours.
 - Shows a full-screen completion overlay with a high-resolution character and live frosted-glass background on the display containing the pointer.
 - Fades in over 0.8 seconds. Keyboard input, mouse movement, clicks, or scrolling dismiss the overlay; it can finish disappearing after one second and otherwise stays for at most one minute.
-- Refreshes the weekly quota every 60 seconds. When the menu bar truncates the status title, the menu reports it and the tooltip retains the full text.
+- Refreshes the five-hour and weekly quotas every 60 seconds. When the menu bar truncates the status title, the menu reports it and the tooltip retains the full text.
 
 ## Architecture
 
@@ -68,7 +68,7 @@ The utility reads the local thread index and lifecycle events under `~/.codex`, 
 
 ## Known Limitations
 
-- Weekly quota availability depends on the current Codex app-server response. The app displays `--` when that window is absent.
+- Five-hour and weekly quota availability depend on the current Codex app-server response. The app displays `--` when either window is absent.
 - macOS does not expose a public API for the exact combined width of all menu bar extras. The app detects truncation of its own title but cannot reliably tell when the system entirely moves the item into overflow.
 
 ## License

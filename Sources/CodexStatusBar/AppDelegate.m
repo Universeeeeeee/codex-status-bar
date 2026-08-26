@@ -12,6 +12,7 @@
 @property(nonatomic) NSMenuItem *statusMenuItem;
 @property(nonatomic) NSMenuItem *tasksSeparator;
 @property(nonatomic) NSArray<NSMenuItem *> *taskMenuItems;
+@property(nonatomic) NSMenuItem *fiveHourMenuItem;
 @property(nonatomic) NSMenuItem *weeklyMenuItem;
 @property(nonatomic) NSMenuItem *updatedMenuItem;
 @property(nonatomic) NSMenuItem *menuSpaceWarningItem;
@@ -57,6 +58,7 @@
     self.menu = menu;
     menu.delegate = self;
     self.statusMenuItem = [[NSMenuItem alloc] initWithTitle:@"状态：读取中" action:nil keyEquivalent:@""];
+    self.fiveHourMenuItem = [[NSMenuItem alloc] initWithTitle:@"5 小时额度：读取中" action:nil keyEquivalent:@""];
     self.weeklyMenuItem = [[NSMenuItem alloc] initWithTitle:@"周额度：读取中" action:nil keyEquivalent:@""];
     self.updatedMenuItem = [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
     self.menuSpaceWarningItem = [[NSMenuItem alloc] initWithTitle:@"菜单栏空间不足：额度文字可能被截断" action:nil keyEquivalent:@""];
@@ -65,7 +67,7 @@
     self.tasksSeparator = NSMenuItem.separatorItem;
     [menu addItem:self.tasksSeparator];
 
-    for (NSMenuItem *item in @[self.weeklyMenuItem, self.updatedMenuItem]) {
+    for (NSMenuItem *item in @[self.fiveHourMenuItem, self.weeklyMenuItem, self.updatedMenuItem]) {
         item.enabled = NO;
         [menu addItem:item];
     }
@@ -152,6 +154,7 @@
 
     NSString *activityTitle = [self titleForActivity:self.activity];
     NSString *symbol = [self symbolForActivity:self.activity];
+    NSString *fiveHour = self.rateLimits.fiveHour ? [NSString stringWithFormat:@"%ld%%", self.rateLimits.fiveHour.remainingPercent] : @"--";
     NSString *weekly = self.rateLimits.weekly ? [NSString stringWithFormat:@"%ld%%", self.rateLimits.weekly.remainingPercent] : @"--";
 
     NSString *statusSummary;
@@ -160,7 +163,7 @@
     } else {
         statusSummary = @"闲置";
     }
-    NSString *statusTitle = [NSString stringWithFormat:@" %@  周 %@", statusSummary, weekly];
+    NSString *statusTitle = [NSString stringWithFormat:@" %@  5h %@  周 %@", statusSummary, fiveHour, weekly];
     self.statusItem.button.title = statusTitle;
     self.statusItem.button.image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:activityTitle];
     self.statusItem.button.imagePosition = NSImageLeading;
@@ -172,6 +175,7 @@
     self.statusMenuItem.title = [NSString stringWithFormat:@"任务：开发中 %ld · 已完成 %ld · 闲置 %ld", workingCount, completedCount, idleCount];
     self.statusMenuItem.image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:activityTitle];
     [self renderTaskItems];
+    self.fiveHourMenuItem.title = [self detailForTitle:@"5 小时额度" bucket:self.rateLimits.fiveHour];
     self.weeklyMenuItem.title = [self detailForTitle:@"周额度" bucket:self.rateLimits.weekly];
     if (self.quotaError) self.updatedMenuItem.title = [NSString stringWithFormat:@"额度读取失败：%@", self.quotaError];
 }
