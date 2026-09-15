@@ -2,6 +2,8 @@
 
 [English](README.en.md)
 
+![任务完成时的全屏提醒效果](Docs/completion-overlay.png)
+
 一个轻量级原生 macOS 菜单栏工具，用于查看本机 Codex 对话的任务状态、5 小时额度和周额度，并在任务完成后提供全屏提醒。
 
 > 这是独立的本地工具，不是 OpenAI 官方产品。

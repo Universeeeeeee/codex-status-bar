@@ -2,6 +2,8 @@
 
 [中文](README.md)
 
+![Full-screen completion overlay](Docs/completion-overlay.png)
+
 A native macOS menu bar utility for monitoring local Codex task activity, the five-hour quota, and the weekly quota.
 
 > This is an independent local utility, not an official OpenAI product.
