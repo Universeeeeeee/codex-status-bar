@@ -157,17 +157,17 @@
     NSString *fiveHour = self.rateLimits.fiveHour ? [NSString stringWithFormat:@"%ld%%", self.rateLimits.fiveHour.remainingPercent] : @"--";
     NSString *weekly = self.rateLimits.weekly ? [NSString stringWithFormat:@"%ld%%", self.rateLimits.weekly.remainingPercent] : @"--";
 
-    NSString *statusSummary;
+    NSString *taskSummary;
     if (workingCount || completedCount) {
-        statusSummary = [NSString stringWithFormat:@"开发 %ld · 完成 %ld", workingCount, completedCount];
+        taskSummary = [NSString stringWithFormat:@"开发 %ld · 完成 %ld", workingCount, completedCount];
     } else {
-        statusSummary = @"闲置";
+        taskSummary = @"闲置";
     }
-    NSString *statusTitle = [NSString stringWithFormat:@" %@  5h %@  周 %@", statusSummary, fiveHour, weekly];
+    NSString *statusTitle = [NSString stringWithFormat:@"5h %@ · 周 %@", fiveHour, weekly];
     self.statusItem.button.title = statusTitle;
     self.statusItem.button.image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:activityTitle];
     self.statusItem.button.imagePosition = NSImageLeading;
-    self.statusItem.button.toolTip = [NSString stringWithFormat:@"Codex 状态与额度\n%@", statusTitle];
+    self.statusItem.button.toolTip = [NSString stringWithFormat:@"Codex 状态与额度\n%@\n任务：%@", statusTitle, taskSummary];
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
         [weakSelf updateMenuBarTruncationWarning];

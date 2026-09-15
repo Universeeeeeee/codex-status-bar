@@ -13,7 +13,7 @@ A native macOS menu bar utility for monitoring local Codex task activity, the fi
 - Keeps completed tasks for ten minutes, then removes idle tasks after five hours.
 - Shows a full-screen completion overlay with a high-resolution character and live frosted-glass background on the display containing the pointer.
 - Fades in over 0.8 seconds. Keyboard input, mouse movement, clicks, or scrolling dismiss the overlay; it can finish disappearing after one second and otherwise stays for at most one minute.
-- Refreshes the five-hour and weekly quotas every 60 seconds. When the menu bar truncates the status title, the menu reports it and the tooltip retains the full text.
+- Refreshes the five-hour and weekly quotas every 60 seconds. The menu bar uses a compact `5h 80% · Week 65%` format, while task details remain in the expanded menu.
 
 ## Architecture
 
