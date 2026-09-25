@@ -154,7 +154,6 @@
 
     NSString *activityTitle = [self titleForActivity:self.activity];
     NSString *symbol = [self symbolForActivity:self.activity];
-    NSString *fiveHour = self.rateLimits.fiveHour ? [NSString stringWithFormat:@"%ld%%", self.rateLimits.fiveHour.remainingPercent] : @"--";
     NSString *weekly = self.rateLimits.weekly ? [NSString stringWithFormat:@"%ld%%", self.rateLimits.weekly.remainingPercent] : @"--";
 
     NSString *taskSummary;
@@ -163,7 +162,7 @@
     } else {
         taskSummary = @"闲置";
     }
-    NSString *statusTitle = [NSString stringWithFormat:@"5h %@ · 周 %@", fiveHour, weekly];
+    NSString *statusTitle = [NSString stringWithFormat:@"周 %@", weekly];
     self.statusItem.button.title = statusTitle;
     self.statusItem.button.image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:activityTitle];
     self.statusItem.button.imagePosition = NSImageLeading;
