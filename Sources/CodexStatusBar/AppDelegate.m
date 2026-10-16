@@ -25,12 +25,19 @@
 @property(nonatomic) BOOL statusRefreshInFlight;
 @property(nonatomic) NSDictionary<NSString *, NSNumber *> *previousActivities;
 @property(nonatomic) NSDate *lastSessionSnapshotAt;
+@property(nonatomic) dispatch_queue_t scanQueue;
+@property(nonatomic, copy) NSString *lastRenderedTitle;
+@property(nonatomic) BOOL taskItemsDirty;
 @end
 
 @implementation CSAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    // 固定串行队列: 原来每次都丢到 global concurrent queue, 会让 libdispatch
+    // 反复创建并保留 worker 线程 (采样时可见约 10 个空闲 worker 线程)
+    self.scanQueue = dispatch_queue_create("local.codex.statusbar.scan", DISPATCH_QUEUE_SERIAL);
+    self.taskItemsDirty = YES;
     self.scanner = [CSSessionScanner new];
     self.client = [CSAppServerClient new];
     NSString *completionImagePath = [NSBundle.mainBundle pathForResource:@"Completion" ofType:@"png"];
@@ -45,7 +52,10 @@
     [self refreshQuota];
 
     self.statusTimer = [NSTimer scheduledTimerWithTimeInterval:3 target:self selector:@selector(refreshStatus) userInfo:nil repeats:YES];
+    // tolerance 让系统可以合并定时器唤醒, 显著降低空闲功耗; 3 秒的精度对这个用途没有意义
+    self.statusTimer.tolerance = 1.0;
     self.quotaTimer = [NSTimer scheduledTimerWithTimeInterval:60 target:self selector:@selector(refreshQuota) userInfo:nil repeats:YES];
+    self.quotaTimer.tolerance = 10.0;
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
@@ -98,15 +108,36 @@
     if (self.statusRefreshInFlight) return;
     self.statusRefreshInFlight = YES;
     __weak typeof(self) weakSelf = self;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    dispatch_async(self.scanQueue, ^{
         NSArray<CSSessionItem *> *sessions = [weakSelf.scanner currentSessions];
         dispatch_async(dispatch_get_main_queue(), ^{
-            weakSelf.statusRefreshInFlight = NO;
-            [weakSelf handleCompletionTransitions:sessions];
-            weakSelf.sessions = sessions;
-            [weakSelf render];
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            strongSelf.statusRefreshInFlight = NO;
+            [strongSelf handleCompletionTransitions:sessions];
+            // 会话列表没变化就整段跳过重绘。改状态栏标题、重建菜单项、
+            // 以及 updateMenuBarTruncationWarning 里的强制布局都很贵,
+            // 而每 3 秒重绘一次纯属浪费。
+            if ([strongSelf sessions:sessions isSameAs:strongSelf.sessions]) return;
+            strongSelf.sessions = sessions;
+            strongSelf.taskItemsDirty = YES;
+            [strongSelf render];
         });
     });
+}
+
+// 轻量比较: 只有会话集合真的变了才重绘界面
+- (BOOL)sessions:(NSArray<CSSessionItem *> *)newSessions isSameAs:(NSArray<CSSessionItem *> *)oldSessions {
+    if (newSessions.count != oldSessions.count) return NO;
+    for (NSUInteger index = 0; index < newSessions.count; index++) {
+        CSSessionItem *left = newSessions[index];
+        CSSessionItem *right = oldSessions[index];
+        if (left.activity != right.activity) return NO;
+        if (![left.threadID isEqualToString:right.threadID]) return NO;
+        if (left.title != right.title && ![left.title isEqualToString:right.title]) return NO;
+        if (left.updatedAt != right.updatedAt && ![left.updatedAt isEqualToDate:right.updatedAt]) return NO;
+    }
+    return YES;
 }
 
 - (void)handleCompletionTransitions:(NSArray<CSSessionItem *> *)sessions {
@@ -164,15 +195,20 @@
     }
     NSString *statusTitle = [NSString stringWithFormat:@"周 %@", weekly];
     self.statusItem.button.title = statusTitle;
-    self.statusItem.button.image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:activityTitle];
+    self.statusItem.button.image = [self symbolImage:symbol];
     self.statusItem.button.imagePosition = NSImageLeading;
     self.statusItem.button.toolTip = [NSString stringWithFormat:@"Codex 状态与额度\n%@\n任务：%@", statusTitle, taskSummary];
-    __weak typeof(self) weakSelf = self;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [weakSelf updateMenuBarTruncationWarning];
-    });
+    // 只有标题真的变了才重新做排版测量: layoutSubtreeIfNeeded 会触发
+    // NSButtonDrawVerticallyCenteredTitle → CoreText 造字排版, 原来每 3 秒跑一次
+    if (![statusTitle isEqualToString:self.lastRenderedTitle]) {
+        self.lastRenderedTitle = statusTitle;
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf updateMenuBarTruncationWarning];
+        });
+    }
     self.statusMenuItem.title = [NSString stringWithFormat:@"任务：开发中 %ld · 已完成 %ld · 闲置 %ld", workingCount, completedCount, idleCount];
-    self.statusMenuItem.image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:activityTitle];
+    self.statusMenuItem.image = [self symbolImage:symbol];
     [self renderTaskItems];
     self.fiveHourMenuItem.title = [self detailForTitle:@"5 小时额度" bucket:self.rateLimits.fiveHour];
     self.weeklyMenuItem.title = [self detailForTitle:@"周额度" bucket:self.rateLimits.weekly];
@@ -188,6 +224,10 @@
 }
 
 - (void)renderTaskItems {
+    // 会话没变化就不重建菜单项 (removeItem + insertItem 会牵动整个 NSMenu 布局)
+    if (!self.taskItemsDirty) return;
+    self.taskItemsDirty = NO;
+
     for (NSMenuItem *item in self.taskMenuItems) [self.menu removeItem:item];
     NSMutableArray<NSMenuItem *> *items = [NSMutableArray array];
     NSInteger insertionIndex = 1;
@@ -204,8 +244,7 @@
             NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:itemTitle action:nil keyEquivalent:@""];
             item.enabled = NO;
             item.indentationLevel = 1;
-            item.image = [NSImage imageWithSystemSymbolName:[self symbolForActivity:session.activity]
-                                    accessibilityDescription:[self titleForActivity:session.activity]];
+            item.image = [self symbolImage:[self symbolForActivity:session.activity]];
             [self.menu insertItem:item atIndex:insertionIndex++];
             [items addObject:item];
         }
@@ -242,6 +281,20 @@
     if (activity == CSActivityWorking) return @"hammer.fill";
     if (activity == CSActivityCompleted) return @"checkmark.circle.fill";
     return @"circle";
+}
+
+// 缓存系统符号图片。原来每次重绘都为状态栏按钮和每个菜单项新建一张 NSImage,
+// 每 3 秒重建最多 100 张 —— 纯浪费。
+- (NSImage *)symbolImage:(NSString *)name {
+    static NSMutableDictionary<NSString *, NSImage *> *cache;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    NSImage *image = cache[name];
+    if (!image) {
+        image = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
+        if (image) cache[name] = image;
+    }
+    return image;
 }
 
 + (NSDateFormatter *)timeFormatter {
