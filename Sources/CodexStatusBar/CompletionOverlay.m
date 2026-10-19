@@ -67,6 +67,11 @@ static const NSTimeInterval CSInputPollInterval = 0.1;
     if (!self.showing) [self showNext];
 }
 
+- (void)dismissAll {
+    self.pendingCount = 0;
+    [self beginFadeOut];
+}
+
 - (void)showNext {
     if (self.pendingCount <= 0) return;
     self.pendingCount -= 1;

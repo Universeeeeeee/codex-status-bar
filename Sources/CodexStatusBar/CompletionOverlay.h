@@ -6,6 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, nullable) dispatch_block_t queueDidDrainHandler;
 - (instancetype)initWithImage:(NSImage *)image;
 - (void)enqueue;
+- (void)dismissAll;
 @end
 
 NS_ASSUME_NONNULL_END

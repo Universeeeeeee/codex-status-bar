@@ -3,6 +3,8 @@
 #import "CompletionOverlay.h"
 #import "Core.h"
 
+static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled";
+
 @interface CSAppDelegate ()
 @property(nonatomic) NSStatusItem *statusItem;
 @property(nonatomic) CSSessionScanner *scanner;
@@ -16,6 +18,7 @@
 @property(nonatomic) NSMenuItem *weeklyMenuItem;
 @property(nonatomic) NSMenuItem *updatedMenuItem;
 @property(nonatomic) NSMenuItem *menuSpaceWarningItem;
+@property(nonatomic) NSMenuItem *completionAlertsMenuItem;
 @property(nonatomic) NSTimer *statusTimer;
 @property(nonatomic) NSTimer *quotaTimer;
 @property(nonatomic) CSActivity activity;
@@ -34,6 +37,7 @@
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    [NSUserDefaults.standardUserDefaults registerDefaults:@{CSCompletionAlertsEnabledKey: @YES}];
     // 固定串行队列: 原来每次都丢到 global concurrent queue, 会让 libdispatch
     // 反复创建并保留 worker 线程 (采样时可见约 10 个空闲 worker 线程)
     self.scanQueue = dispatch_queue_create("local.codex.statusbar.scan", DISPATCH_QUEUE_SERIAL);
@@ -86,6 +90,11 @@
     [menu addItem:self.menuSpaceWarningItem];
     [menu addItem:NSMenuItem.separatorItem];
 
+    self.completionAlertsMenuItem = [[NSMenuItem alloc] initWithTitle:@"全屏完成提醒" action:@selector(toggleCompletionAlerts:) keyEquivalent:@""];
+    self.completionAlertsMenuItem.target = self;
+    self.completionAlertsMenuItem.state = [NSUserDefaults.standardUserDefaults boolForKey:CSCompletionAlertsEnabledKey] ? NSControlStateValueOn : NSControlStateValueOff;
+    [menu addItem:self.completionAlertsMenuItem];
+
     NSMenuItem *refresh = [[NSMenuItem alloc] initWithTitle:@"刷新额度" action:@selector(refreshQuota) keyEquivalent:@"r"];
     refresh.target = self;
     refresh.image = [NSImage imageWithSystemSymbolName:@"arrow.clockwise" accessibilityDescription:@"刷新额度"];
@@ -102,6 +111,13 @@
 
 - (void)menuWillOpen:(NSMenu *)menu {
     [self refreshStatus];
+}
+
+- (void)toggleCompletionAlerts:(NSMenuItem *)sender {
+    BOOL enabled = ![NSUserDefaults.standardUserDefaults boolForKey:CSCompletionAlertsEnabledKey];
+    [NSUserDefaults.standardUserDefaults setBool:enabled forKey:CSCompletionAlertsEnabledKey];
+    sender.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
+    if (!enabled) [self.completionOverlay dismissAll];
 }
 
 - (void)refreshStatus {
@@ -150,7 +166,10 @@
             BOOL changedFromWorking = previous && previous.integerValue == CSActivityWorking;
             BOOL completedSinceLastScan = session.eventDate &&
                                           [session.eventDate compare:self.lastSessionSnapshotAt] == NSOrderedDescending;
-            if (changedFromWorking || completedSinceLastScan) [self.completionOverlay enqueue];
+            if ((changedFromWorking || completedSinceLastScan) &&
+                [NSUserDefaults.standardUserDefaults boolForKey:CSCompletionAlertsEnabledKey]) {
+                [self.completionOverlay enqueue];
+            }
         }
     }
 
