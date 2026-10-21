@@ -63,6 +63,7 @@ static const NSTimeInterval CSInputPollInterval = 0.1;
 }
 
 - (void)enqueue {
+    if (self.showing) return;
     self.pendingCount += 1;
     if (!self.showing) [self showNext];
 }

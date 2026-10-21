@@ -26,8 +26,7 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
 @property(nonatomic) CSRateSnapshot *rateLimits;
 @property(nonatomic) NSString *quotaError;
 @property(nonatomic) BOOL statusRefreshInFlight;
-@property(nonatomic) NSDictionary<NSString *, NSNumber *> *previousActivities;
-@property(nonatomic) NSDate *lastSessionSnapshotAt;
+@property(nonatomic) CSCompletionTracker *completionTracker;
 @property(nonatomic) dispatch_queue_t scanQueue;
 @property(nonatomic, copy) NSString *lastRenderedTitle;
 @property(nonatomic) BOOL taskItemsDirty;
@@ -49,7 +48,7 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     if (completionImage) self.completionOverlay = [[CSCompletionOverlay alloc] initWithImage:completionImage];
     self.sessions = @[];
     self.taskMenuItems = @[];
-    self.previousActivities = @{};
+    self.completionTracker = [CSCompletionTracker new];
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
     [self configureMenu];
     [self refreshStatus];
@@ -158,27 +157,12 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
 
 - (void)handleCompletionTransitions:(NSArray<CSSessionItem *> *)sessions {
     NSDate *snapshotAt = NSDate.date;
-    if (self.lastSessionSnapshotAt) {
-        for (CSSessionItem *session in sessions) {
-            if (session.activity != CSActivityCompleted) continue;
-
-            NSNumber *previous = self.previousActivities[session.threadID];
-            BOOL changedFromWorking = previous && previous.integerValue == CSActivityWorking;
-            BOOL completedSinceLastScan = session.eventDate &&
-                                          [session.eventDate compare:self.lastSessionSnapshotAt] == NSOrderedDescending;
-            if ((changedFromWorking || completedSinceLastScan) &&
-                [NSUserDefaults.standardUserDefaults boolForKey:CSCompletionAlertsEnabledKey]) {
-                [self.completionOverlay enqueue];
-            }
+    for (CSSessionItem *session in sessions) {
+        if ([self.completionTracker consumeSession:session atDate:snapshotAt] &&
+            [NSUserDefaults.standardUserDefaults boolForKey:CSCompletionAlertsEnabledKey]) {
+            [self.completionOverlay enqueue];
         }
     }
-
-    NSMutableDictionary<NSString *, NSNumber *> *nextActivities = [NSMutableDictionary dictionary];
-    for (CSSessionItem *session in sessions) {
-        nextActivities[session.threadID] = @(session.activity);
-    }
-    self.previousActivities = nextActivities;
-    self.lastSessionSnapshotAt = snapshotAt;
 }
 
 - (void)refreshQuota {

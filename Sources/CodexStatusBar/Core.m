@@ -17,6 +17,31 @@ static const NSTimeInterval CSVisibilityWindow = 5 * 60 * 60;
 @implementation CSSessionItem
 @end
 
+@interface CSCompletionTracker ()
+@property(nonatomic) NSDate *startedAt;
+@property(nonatomic) NSMutableDictionary<NSString *, NSDate *> *latestEvents;
+@end
+
+@implementation CSCompletionTracker
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _startedAt = NSDate.date;
+        _latestEvents = [NSMutableDictionary dictionary];
+    }
+    return self;
+}
+
+- (BOOL)consumeSession:(CSSessionItem *)session atDate:(NSDate *)now {
+    NSDate *eventDate = session.eventDate;
+    if (!eventDate || !session.threadID.length || [eventDate compare:now] == NSOrderedDescending) return NO;
+    NSDate *previous = self.latestEvents[session.threadID] ?: self.startedAt;
+    if ([eventDate compare:previous] != NSOrderedDescending) return NO;
+    self.latestEvents[session.threadID] = eventDate;
+    return session.activity == CSActivityCompleted;
+}
+@end
+
 @interface CSSessionCacheEntry : NSObject
 @property(nonatomic) unsigned long long fileSize;
 @property(nonatomic) CSActivity activity;

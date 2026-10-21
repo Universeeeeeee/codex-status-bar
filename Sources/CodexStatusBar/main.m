@@ -34,6 +34,33 @@ static int RunSelfTests(void) {
     workingTask.activity = CSActivityWorking;
     if (CSAggregateSessionActivity(@[completedTask, workingTask]) != CSActivityWorking) return 10;
 
+    CSCompletionTracker *tracker = [CSCompletionTracker new];
+    CSSessionItem *event = [CSSessionItem new];
+    event.threadID = @"completion-fixture";
+    event.activity = CSActivityCompleted;
+    NSDate *baseline = [NSDate dateWithTimeIntervalSinceNow:1];
+    event.eventDate = [baseline dateByAddingTimeInterval:-60];
+    if ([tracker consumeSession:event atDate:baseline]) return 11;
+    event.eventDate = baseline;
+    if (![tracker consumeSession:event atDate:baseline]) return 12;
+    if ([tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:10]]) return 13;
+    event.activity = CSActivityWorking;
+    event.eventDate = [baseline dateByAddingTimeInterval:1];
+    if ([tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:2]]) return 14;
+    event.activity = CSActivityCompleted;
+    event.eventDate = baseline;
+    if ([tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:2]]) return 15;
+    event.eventDate = [baseline dateByAddingTimeInterval:3];
+    if (![tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:4]]) return 16;
+    event.eventDate = [baseline dateByAddingTimeInterval:100];
+    if ([tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:4]]) return 17;
+    event.eventDate = nil;
+    if ([tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:4]]) return 18;
+    event.threadID = @"fast-task-fixture";
+    event.eventDate = [baseline dateByAddingTimeInterval:4];
+    if (![tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:5]]) return 19;
+    if ([tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:20]]) return 20;
+
     puts("All parser tests passed");
     return 0;
 }

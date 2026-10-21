@@ -40,4 +40,8 @@ FOUNDATION_EXPORT CSRateSnapshot *_Nullable CSMergeRateSnapshots(CSRateSnapshot 
 - (CSActivity)currentActivity;
 @end
 
+@interface CSCompletionTracker : NSObject
+- (BOOL)consumeSession:(CSSessionItem *)session atDate:(NSDate *)now;
+@end
+
 NS_ASSUME_NONNULL_END
