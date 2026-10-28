@@ -10,6 +10,7 @@ mkdir -p "$BUILD/module-cache"
 clang -fobjc-arc -O2 -mmacosx-version-min=13.0 \
     -fmodules-cache-path="$BUILD/module-cache" \
     -framework Cocoa \
+    -framework UniformTypeIdentifiers \
     -lsqlite3 \
     Sources/CodexStatusBar/*.m \
     -o "$BUILD/CodexStatusBar"

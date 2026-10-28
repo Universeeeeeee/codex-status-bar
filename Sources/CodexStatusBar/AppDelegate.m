@@ -2,6 +2,7 @@
 #import "AppServerClient.h"
 #import "CompletionOverlay.h"
 #import "Core.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled";
 
@@ -19,6 +20,7 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
 @property(nonatomic) NSMenuItem *updatedMenuItem;
 @property(nonatomic) NSMenuItem *menuSpaceWarningItem;
 @property(nonatomic) NSMenuItem *completionAlertsMenuItem;
+@property(nonatomic) NSMenuItem *restoreCompletionImageMenuItem;
 @property(nonatomic) NSTimer *statusTimer;
 @property(nonatomic) NSTimer *quotaTimer;
 @property(nonatomic) CSActivity activity;
@@ -43,8 +45,7 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     self.taskItemsDirty = YES;
     self.scanner = [CSSessionScanner new];
     self.client = [CSAppServerClient new];
-    NSString *completionImagePath = [NSBundle.mainBundle pathForResource:@"Completion" ofType:@"png"];
-    NSImage *completionImage = completionImagePath ? [[NSImage alloc] initWithContentsOfFile:completionImagePath] : nil;
+    NSImage *completionImage = [self savedCompletionImage] ?: [self defaultCompletionImage];
     if (completionImage) self.completionOverlay = [[CSCompletionOverlay alloc] initWithImage:completionImage];
     self.sessions = @[];
     self.taskMenuItems = @[];
@@ -94,6 +95,21 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     self.completionAlertsMenuItem.state = [NSUserDefaults.standardUserDefaults boolForKey:CSCompletionAlertsEnabledKey] ? NSControlStateValueOn : NSControlStateValueOff;
     [menu addItem:self.completionAlertsMenuItem];
 
+    NSMenuItem *chooseImage = [[NSMenuItem alloc] initWithTitle:@"更换提示图片…" action:@selector(chooseCompletionImage:) keyEquivalent:@""];
+    chooseImage.target = self;
+    chooseImage.image = [NSImage imageWithSystemSymbolName:@"photo" accessibilityDescription:@"更换提示图片"];
+    [menu addItem:chooseImage];
+
+    self.restoreCompletionImageMenuItem = [[NSMenuItem alloc] initWithTitle:@"恢复默认图片" action:@selector(restoreCompletionImage:) keyEquivalent:@""];
+    self.restoreCompletionImageMenuItem.target = self;
+    [menu addItem:self.restoreCompletionImageMenuItem];
+
+    NSMenuItem *preview = [[NSMenuItem alloc] initWithTitle:@"预览全屏提示" action:@selector(previewCompletionImage:) keyEquivalent:@""];
+    preview.target = self;
+    preview.image = [NSImage imageWithSystemSymbolName:@"play.rectangle" accessibilityDescription:@"预览全屏提示"];
+    [menu addItem:preview];
+    [menu addItem:NSMenuItem.separatorItem];
+
     NSMenuItem *refresh = [[NSMenuItem alloc] initWithTitle:@"刷新额度" action:@selector(refreshQuota) keyEquivalent:@"r"];
     refresh.target = self;
     refresh.image = [NSImage imageWithSystemSymbolName:@"arrow.clockwise" accessibilityDescription:@"刷新额度"];
@@ -110,6 +126,67 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
 
 - (void)menuWillOpen:(NSMenu *)menu {
     [self refreshStatus];
+}
+
+- (NSURL *)completionImageURL {
+    NSURL *support = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
+    return [[support URLByAppendingPathComponent:@"Codex Status Bar" isDirectory:YES] URLByAppendingPathComponent:@"CompletionImage"];
+}
+
+- (NSImage *)savedCompletionImage {
+    NSData *data = [NSData dataWithContentsOfURL:[self completionImageURL]];
+    NSImage *image = data ? [[NSImage alloc] initWithData:data] : nil;
+    return image.isValid ? image : nil;
+}
+
+- (NSImage *)defaultCompletionImage {
+    NSString *path = [NSBundle.mainBundle pathForResource:@"Completion" ofType:@"png"];
+    return path ? [[NSImage alloc] initWithContentsOfFile:path] : nil;
+}
+
+- (BOOL)setCompletionImageFromURL:(NSURL *)url error:(NSError **)error {
+    NSData *data = [NSData dataWithContentsOfURL:url options:0 error:error];
+    if (!data) return NO;
+    NSImage *image = [[NSImage alloc] initWithData:data];
+    if (!image.isValid) {
+        if (error) *error = [NSError errorWithDomain:@"CodexStatusBar" code:2 userInfo:@{NSLocalizedDescriptionKey: @"无法读取此图片，请选择有效的 GIF 或静态图片。"}];
+        return NO;
+    }
+    NSURL *destination = [self completionImageURL];
+    if (![NSFileManager.defaultManager createDirectoryAtURL:destination.URLByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:error] ||
+        ![data writeToURL:destination options:NSDataWritingAtomic error:error]) return NO;
+    if (self.completionOverlay) [self.completionOverlay setImage:image];
+    else self.completionOverlay = [[CSCompletionOverlay alloc] initWithImage:image];
+    return YES;
+}
+
+- (void)chooseCompletionImage:(id)sender {
+    [self.completionOverlay dismissAll];
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.title = @"更换全屏提示图片";
+    panel.allowedContentTypes = @[UTTypeImage];
+    panel.canChooseDirectories = NO;
+    panel.allowsMultipleSelection = NO;
+    [NSApp activateIgnoringOtherApps:YES];
+    if ([panel runModal] != NSModalResponseOK) return;
+    NSError *error = nil;
+    if (![self setCompletionImageFromURL:panel.URL error:&error]) [NSApp presentError:error];
+}
+
+- (void)restoreCompletionImage:(id)sender {
+    NSURL *url = [self completionImageURL];
+    NSError *error = nil;
+    if ([NSFileManager.defaultManager fileExistsAtPath:url.path] &&
+        ![NSFileManager.defaultManager removeItemAtURL:url error:&error]) {
+        [NSApp presentError:error];
+        return;
+    }
+    NSImage *image = [self defaultCompletionImage];
+    if (image) [self.completionOverlay setImage:image];
+}
+
+- (void)previewCompletionImage:(id)sender {
+    [self.completionOverlay enqueue];
 }
 
 - (void)toggleCompletionAlerts:(NSMenuItem *)sender {

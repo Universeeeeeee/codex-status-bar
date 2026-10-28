@@ -5,6 +5,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface CSCompletionOverlay : NSObject
 @property(nonatomic, copy, nullable) dispatch_block_t queueDidDrainHandler;
 - (instancetype)initWithImage:(NSImage *)image;
+- (void)setImage:(NSImage *)image;
 - (void)enqueue;
 - (void)dismissAll;
 @end

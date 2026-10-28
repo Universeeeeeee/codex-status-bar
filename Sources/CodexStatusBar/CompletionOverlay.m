@@ -55,7 +55,7 @@ static const NSTimeInterval CSInputPollInterval = 0.1;
     _imageView.image = image;
     _imageView.imageAlignment = NSImageAlignCenter;
     _imageView.imageScaling = NSImageScaleProportionallyUpOrDown;
-    _imageView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    _imageView.autoresizingMask = NSViewMinXMargin | NSViewMaxXMargin | NSViewMinYMargin | NSViewMaxYMargin;
     [_rootView addSubview:_blurView];
     [_rootView addSubview:_imageView];
     _panel.contentView = _rootView;
@@ -66,6 +66,32 @@ static const NSTimeInterval CSInputPollInterval = 0.1;
     if (self.showing) return;
     self.pendingCount += 1;
     if (!self.showing) [self showNext];
+}
+
+- (void)setImage:(NSImage *)image {
+    self.imageView.animates = NO;
+    self.imageView.image = image;
+    if (self.showing) [self layoutImageForScreen:self.panel.screen ?: NSScreen.mainScreen];
+    self.imageView.animates = self.showing;
+}
+
+- (void)layoutImageForScreen:(NSScreen *)screen {
+    NSSize size = self.imageView.image.size;
+    CGFloat backingScale = screen ? screen.backingScaleFactor : 1;
+    for (NSImageRep *representation in self.imageView.image.representations) {
+        if (representation.pixelsWide > 0 && representation.pixelsHigh > 0) {
+            size = NSMakeSize(representation.pixelsWide / backingScale, representation.pixelsHigh / backingScale);
+            break;
+        }
+    }
+    if (size.width <= 0 || size.height <= 0) return;
+    NSRect bounds = self.rootView.bounds;
+    CGFloat scale = MIN(1, MIN(NSWidth(bounds) / size.width, NSHeight(bounds) / size.height));
+    size.width *= scale;
+    size.height *= scale;
+    self.imageView.frame = NSMakeRect(NSMidX(bounds) - size.width / 2,
+                                     NSMidY(bounds) - size.height / 2,
+                                     size.width, size.height);
 }
 
 - (void)dismissAll {
@@ -88,8 +114,15 @@ static const NSTimeInterval CSInputPollInterval = 0.1;
     [self.panel setFrame:screen.frame display:YES];
     self.rootView.frame = self.panel.contentView.bounds;
     self.blurView.frame = self.rootView.bounds;
-    self.imageView.frame = self.rootView.bounds;
+    [self layoutImageForScreen:screen];
     self.panel.alphaValue = 0;
+    for (NSImageRep *representation in self.imageView.image.representations) {
+        if ([representation isKindOfClass:NSBitmapImageRep.class] &&
+            [[(NSBitmapImageRep *)representation valueForProperty:NSImageFrameCount] integerValue] > 1) {
+            [(NSBitmapImageRep *)representation setProperty:NSImageCurrentFrame withValue:@0];
+        }
+    }
+    self.imageView.animates = YES;
     [self.panel orderFrontRegardless];
     self.shownAt = NSProcessInfo.processInfo.systemUptime;
     [self startInputMonitoring];
@@ -149,6 +182,7 @@ static const NSTimeInterval CSInputPollInterval = 0.1;
         weakSelf.panel.animator.alphaValue = 0;
     } completionHandler:^{
         [weakSelf.panel orderOut:nil];
+        weakSelf.imageView.animates = NO;
         weakSelf.showing = NO;
         weakSelf.fadingOut = NO;
         if (weakSelf.pendingCount > 0) {
