@@ -77,14 +77,22 @@ static const NSTimeInterval CSInputPollInterval = 0.1;
 
 - (void)layoutImageForScreen:(NSScreen *)screen {
     NSSize size = self.imageView.image.size;
+    BOOL animated = NO;
     CGFloat backingScale = screen ? screen.backingScaleFactor : 1;
     for (NSImageRep *representation in self.imageView.image.representations) {
         if (representation.pixelsWide > 0 && representation.pixelsHigh > 0) {
             size = NSMakeSize(representation.pixelsWide / backingScale, representation.pixelsHigh / backingScale);
+            animated = [representation isKindOfClass:NSBitmapImageRep.class] &&
+                       [[(NSBitmapImageRep *)representation valueForProperty:NSImageFrameCount] integerValue] > 1;
             break;
         }
     }
     if (size.width <= 0 || size.height <= 0) return;
+    if (animated) {
+        CGFloat scale = MIN(600 / size.width, 600 / size.height);
+        size.width *= scale;
+        size.height *= scale;
+    }
     NSRect bounds = self.rootView.bounds;
     CGFloat scale = MIN(1, MIN(NSWidth(bounds) / size.width, NSHeight(bounds) / size.height));
     size.width *= scale;
