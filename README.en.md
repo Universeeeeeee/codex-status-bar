@@ -14,7 +14,8 @@ A native macOS menu bar utility for monitoring local Codex task activity, the fi
 - Lists each user conversation independently as **Working**, **Completed**, or **Idle**. Internal subagents are excluded.
 - Keeps completed tasks for ten minutes, then removes idle tasks after five hours.
 - Shows a full-screen completion overlay with a high-resolution character and live frosted-glass background on the display containing the pointer.
-- Toggle completion overlays with “全屏完成提醒” in the menu. The setting persists across restarts; turning it off fades out the current overlay and clears queued overlays.
+- Questions from `request_user_input` or `request_user_input_async` also trigger an overlay and mark the task as waiting for input. A reply resumes the working state; ordinary progress messages do not trigger alerts.
+- Toggle overlays with “全屏提醒（完成 / 等待回复）” in the menu. The setting persists across restarts; turning it off fades out the current overlay and clears queued overlays.
 - Choose an animated GIF or static image with “更换提示图片…”. The file is copied into local Application Support and retained across restarts. Preview the overlay or restore the default image from the menu. GIF playback stops when the overlay is hidden.
 - Images are centered. GIFs fit within a 600-by-600-point display area; static images are never enlarged beyond their original pixel dimensions. The surrounding area retains the full-screen frosted-glass effect.
 - Completion events are deduplicated by conversation and timestamp. Events from before launch are ignored, and completions received during an overlay are merged into it instead of queued for later.

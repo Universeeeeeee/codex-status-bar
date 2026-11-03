@@ -61,6 +61,33 @@ static int RunSelfTests(void) {
     if (![tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:5]]) return 19;
     if ([tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:20]]) return 20;
 
+    NSString *questionStart = @"{\"timestamp\":\"2026-07-13T08:00:00.000Z\",\"payload\":{\"type\":\"task_started\"}}\n";
+    NSString *asyncQuestion = @"{\"timestamp\":\"2026-07-13T08:01:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"request_user_input_async\",\"call_id\":\"question-1\"}}\n";
+    NSString *accepted = @"{\"timestamp\":\"2026-07-13T08:01:01.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"question-1\",\"output\":\"{\\\"accepted\\\":true}\"}}\n";
+    NSString *questionLog = [[questionStart stringByAppendingString:asyncQuestion] stringByAppendingString:accepted];
+    if (CSParseSessionData([questionLog dataUsingEncoding:NSUTF8StringEncoding], NULL) != CSActivityWaitingForInput) return 21;
+    NSString *reply = @"{\"timestamp\":\"2026-07-13T08:02:00.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\"}}\n";
+    if (CSParseSessionData([[questionLog stringByAppendingString:reply] dataUsingEncoding:NSUTF8StringEncoding], NULL) != CSActivityWorking) return 22;
+    NSString *blocking = [asyncQuestion stringByReplacingOccurrencesOfString:@"request_user_input_async" withString:@"functions.request_user_input"];
+    if (CSParseSessionData([[questionStart stringByAppendingString:blocking] dataUsingEncoding:NSUTF8StringEncoding], NULL) != CSActivityWaitingForInput) return 23;
+    if (CSParseSessionData([[[questionStart stringByAppendingString:blocking] stringByAppendingString:accepted] dataUsingEncoding:NSUTF8StringEncoding], NULL) != CSActivityWorking) return 24;
+    NSString *ordinaryTool = [asyncQuestion stringByReplacingOccurrencesOfString:@"request_user_input_async" withString:@"exec_command"];
+    if (CSParseSessionData([[questionStart stringByAppendingString:ordinaryTool] dataUsingEncoding:NSUTF8StringEncoding], NULL) != CSActivityWorking) return 25;
+    event.threadID = @"question-fixture";
+    event.activity = CSActivityWaitingForInput;
+    event.eventDate = [baseline dateByAddingTimeInterval:5];
+    if (![tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:6]]) return 26;
+    if ([tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:7]]) return 27;
+    event.activity = CSActivityWorking;
+    event.eventDate = [baseline dateByAddingTimeInterval:8];
+    if ([tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:9]]) return 28;
+    event.activity = CSActivityWaitingForInput;
+    event.eventDate = [baseline dateByAddingTimeInterval:10];
+    if (![tracker consumeSession:event atDate:[baseline dateByAddingTimeInterval:11]]) return 29;
+    if (CSAggregateSessionActivity(@[workingTask, event]) != CSActivityWaitingForInput) return 30;
+    NSString *messageReply = @"{\"timestamp\":\"2026-07-13T08:02:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\"}}\n";
+    if (CSParseSessionData([[questionLog stringByAppendingString:messageReply] dataUsingEncoding:NSUTF8StringEncoding], NULL) != CSActivityWorking) return 31;
+
     puts("All parser tests passed");
     return 0;
 }
@@ -69,7 +96,8 @@ static int PrintSessions(void) {
     CSSessionScanner *scanner = [CSSessionScanner new];
     for (CSSessionItem *session in scanner.currentSessions) {
         const char *status = session.activity == CSActivityWorking ? "working" :
-                             session.activity == CSActivityCompleted ? "completed" : "idle";
+                             session.activity == CSActivityCompleted ? "completed" :
+                             session.activity == CSActivityWaitingForInput ? "waiting" : "idle";
         printf("%s\t%s\t%s\n", status, session.threadID.UTF8String, session.title.UTF8String);
     }
     return 0;

@@ -38,7 +38,7 @@ static const NSTimeInterval CSVisibilityWindow = 5 * 60 * 60;
     NSDate *previous = self.latestEvents[session.threadID] ?: self.startedAt;
     if ([eventDate compare:previous] != NSOrderedDescending) return NO;
     self.latestEvents[session.threadID] = eventDate;
-    return session.activity == CSActivityCompleted;
+    return session.activity == CSActivityCompleted || session.activity == CSActivityWaitingForInput;
 }
 @end
 
@@ -46,6 +46,8 @@ static const NSTimeInterval CSVisibilityWindow = 5 * 60 * 60;
 @property(nonatomic) unsigned long long fileSize;
 @property(nonatomic) CSActivity activity;
 @property(nonatomic, nullable) NSDate *eventDate;
+@property(nonatomic, nullable) NSString *inputCallID;
+@property(nonatomic) BOOL inputIsAsync;
 @end
 
 @implementation CSSessionCacheEntry
@@ -61,31 +63,57 @@ static NSDate *CSParseDate(NSString *value) {
     return [formatter dateFromString:value];
 }
 
-BOOL CSTryParseSessionData(NSData *data, CSActivity *activity, NSDate **eventDate) {
+static BOOL CSParseSessionUpdate(NSData *data, CSActivity *activity, NSDate **eventDate,
+                                 NSString **inputCallID, BOOL *inputIsAsync) {
     NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!text) return NO;
 
     NSArray<NSString *> *lines = [text componentsSeparatedByString:@"\n"];
-    NSSet<NSString *> *lifecycle = [NSSet setWithObjects:@"task_started", @"task_complete", @"turn_aborted", nil];
-    for (NSString *line in [lines reverseObjectEnumerator]) {
+    BOOL found = NO;
+    for (NSString *line in lines) {
         NSData *lineData = [line dataUsingEncoding:NSUTF8StringEncoding];
         NSDictionary *object = lineData.length ? [NSJSONSerialization JSONObjectWithData:lineData options:0 error:nil] : nil;
         NSDictionary *payload = [object[@"payload"] isKindOfClass:NSDictionary.class] ? object[@"payload"] : nil;
         NSString *type = [payload[@"type"] isKindOfClass:NSString.class] ? payload[@"type"] : nil;
-        if (!type || ![lifecycle containsObject:type]) continue;
-
-        if (eventDate) {
-            NSString *timestamp = [object[@"timestamp"] isKindOfClass:NSString.class] ? object[@"timestamp"] : nil;
-            *eventDate = timestamp ? CSParseDate(timestamp) : nil;
+        CSActivity next;
+        if ([type isEqualToString:@"task_started"] || [type isEqualToString:@"task_complete"] ||
+            [type isEqualToString:@"turn_aborted"]) {
+            next = [type isEqualToString:@"task_started"] ? CSActivityWorking :
+                   [type isEqualToString:@"task_complete"] ? CSActivityCompleted : CSActivityIdle;
+            *inputCallID = nil;
+        } else if ([object[@"type"] isEqual:@"response_item"] && [type isEqualToString:@"function_call"]) {
+            NSString *name = [payload[@"name"] isKindOfClass:NSString.class] ? payload[@"name"] : @"";
+            name = [name componentsSeparatedByString:@"."].lastObject;
+            if (![name isEqualToString:@"request_user_input"] && ![name isEqualToString:@"request_user_input_async"]) continue;
+            NSString *callID = [payload[@"call_id"] isKindOfClass:NSString.class] ? payload[@"call_id"] : nil;
+            if (!callID.length) continue;
+            *inputCallID = callID;
+            *inputIsAsync = [name isEqualToString:@"request_user_input_async"];
+            next = CSActivityWaitingForInput;
+        } else if (*inputCallID && ([type isEqualToString:@"user_message"] ||
+                   ([object[@"type"] isEqual:@"response_item"] && [type isEqualToString:@"message"] &&
+                    [payload[@"role"] isEqual:@"user"]))) {
+            *inputCallID = nil;
+            next = CSActivityWorking;
+        } else if ([object[@"type"] isEqual:@"response_item"] && [type isEqualToString:@"function_call_output"] &&
+                   *inputCallID && !*inputIsAsync && [payload[@"call_id"] isEqual:*inputCallID]) {
+            *inputCallID = nil;
+            next = CSActivityWorking;
+        } else {
+            continue;
         }
-        if (activity) {
-            if ([type isEqualToString:@"task_started"]) *activity = CSActivityWorking;
-            else if ([type isEqualToString:@"task_complete"]) *activity = CSActivityCompleted;
-            else *activity = CSActivityIdle;
-        }
-        return YES;
+        NSString *timestamp = [object[@"timestamp"] isKindOfClass:NSString.class] ? object[@"timestamp"] : nil;
+        if (eventDate) *eventDate = timestamp ? CSParseDate(timestamp) : nil;
+        if (activity) *activity = next;
+        found = YES;
     }
-    return NO;
+    return found;
+}
+
+BOOL CSTryParseSessionData(NSData *data, CSActivity *activity, NSDate **eventDate) {
+    NSString *inputCallID = nil;
+    BOOL inputIsAsync = NO;
+    return CSParseSessionUpdate(data, activity, eventDate, &inputCallID, &inputIsAsync);
 }
 
 CSActivity CSParseSessionData(NSData *data, NSDate **eventDate) {
@@ -103,6 +131,9 @@ BOOL CSVisibleSessionActivity(CSActivity rawActivity, NSDate *lastActivityAt, NS
 }
 
 CSActivity CSAggregateSessionActivity(NSArray<CSSessionItem *> *sessions) {
+    for (CSSessionItem *session in sessions) {
+        if (session.activity == CSActivityWaitingForInput) return CSActivityWaitingForInput;
+    }
     for (CSSessionItem *session in sessions) {
         if (session.activity == CSActivityWorking) return CSActivityWorking;
     }
@@ -328,21 +359,25 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
 
     CSActivity activity = cached ? cached.activity : CSActivityIdle;
     NSDate *eventDate = cached.eventDate;
+    NSString *inputCallID = cached.inputCallID;
+    BOOL inputIsAsync = cached.inputIsAsync;
     BOOL found = NO;
     if (cached && size > cached.fileSize) {
         [handle seekToFileOffset:cached.fileSize];
         NSData *appended = [handle readDataToEndOfFile];
-        found = CSTryParseSessionData(appended, &activity, &eventDate);
+        found = CSParseSessionUpdate(appended, &activity, &eventDate, &inputCallID, &inputIsAsync);
     } else {
         unsigned long long tailSize = 256 * 1024;
         if (size > tailSize) [handle seekToFileOffset:size - tailSize];
         else [handle seekToFileOffset:0];
         NSData *tail = [handle readDataToEndOfFile];
-        found = CSTryParseSessionData(tail, &activity, &eventDate);
+        inputCallID = nil;
+        inputIsAsync = NO;
+        found = CSParseSessionUpdate(tail, &activity, &eventDate, &inputCallID, &inputIsAsync);
         if (!found && size > tailSize) {
             [handle seekToFileOffset:0];
             NSData *fullData = [handle readDataToEndOfFile];
-            found = CSTryParseSessionData(fullData, &activity, &eventDate);
+            found = CSParseSessionUpdate(fullData, &activity, &eventDate, &inputCallID, &inputIsAsync);
         }
     }
     [handle closeFile];
@@ -352,6 +387,8 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
     if (found) {
         entry.activity = activity;
         entry.eventDate = eventDate;
+        entry.inputCallID = inputCallID;
+        entry.inputIsAsync = inputIsAsync;
     }
     self.stateCache[path] = entry;
     return entry;
@@ -399,6 +436,7 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
 }
 
 - (NSInteger)rankForActivity:(CSActivity)activity {
+    if (activity == CSActivityWaitingForInput) return -1;
     if (activity == CSActivityWorking) return 0;
     if (activity == CSActivityCompleted) return 1;
     return 2;

@@ -90,7 +90,7 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     [menu addItem:self.menuSpaceWarningItem];
     [menu addItem:NSMenuItem.separatorItem];
 
-    self.completionAlertsMenuItem = [[NSMenuItem alloc] initWithTitle:@"全屏完成提醒" action:@selector(toggleCompletionAlerts:) keyEquivalent:@""];
+    self.completionAlertsMenuItem = [[NSMenuItem alloc] initWithTitle:@"全屏提醒（完成 / 等待回复）" action:@selector(toggleCompletionAlerts:) keyEquivalent:@""];
     self.completionAlertsMenuItem.target = self;
     self.completionAlertsMenuItem.state = [NSUserDefaults.standardUserDefaults boolForKey:CSCompletionAlertsEnabledKey] ? NSControlStateValueOn : NSControlStateValueOff;
     [menu addItem:self.completionAlertsMenuItem];
@@ -261,6 +261,7 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     NSInteger workingCount = [self countForActivity:CSActivityWorking];
     NSInteger completedCount = [self countForActivity:CSActivityCompleted];
     NSInteger idleCount = [self countForActivity:CSActivityIdle];
+    NSInteger waitingCount = [self countForActivity:CSActivityWaitingForInput];
     self.activity = CSAggregateSessionActivity(self.sessions);
 
     NSString *activityTitle = [self titleForActivity:self.activity];
@@ -268,8 +269,8 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     NSString *weekly = self.rateLimits.weekly ? [NSString stringWithFormat:@"%ld%%", self.rateLimits.weekly.remainingPercent] : @"--";
 
     NSString *taskSummary;
-    if (workingCount || completedCount) {
-        taskSummary = [NSString stringWithFormat:@"开发 %ld · 完成 %ld", workingCount, completedCount];
+    if (workingCount || completedCount || waitingCount) {
+        taskSummary = [NSString stringWithFormat:@"待回复 %ld · 开发 %ld · 完成 %ld", waitingCount, workingCount, completedCount];
     } else {
         taskSummary = @"闲置";
     }
@@ -287,7 +288,7 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
             [weakSelf updateMenuBarTruncationWarning];
         });
     }
-    self.statusMenuItem.title = [NSString stringWithFormat:@"任务：开发中 %ld · 已完成 %ld · 闲置 %ld", workingCount, completedCount, idleCount];
+    self.statusMenuItem.title = [NSString stringWithFormat:@"任务：待回复 %ld · 开发中 %ld · 已完成 %ld · 闲置 %ld", waitingCount, workingCount, completedCount, idleCount];
     self.statusMenuItem.image = [self symbolImage:symbol];
     [self renderTaskItems];
     self.fiveHourMenuItem.title = [self detailForTitle:@"5 小时额度" bucket:self.rateLimits.fiveHour];
@@ -352,12 +353,14 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
 }
 
 - (NSString *)titleForActivity:(CSActivity)activity {
+    if (activity == CSActivityWaitingForInput) return @"等待回复";
     if (activity == CSActivityWorking) return @"开发中";
     if (activity == CSActivityCompleted) return @"已完成";
     return @"闲置";
 }
 
 - (NSString *)symbolForActivity:(CSActivity)activity {
+    if (activity == CSActivityWaitingForInput) return @"questionmark.bubble.fill";
     if (activity == CSActivityWorking) return @"hammer.fill";
     if (activity == CSActivityCompleted) return @"checkmark.circle.fill";
     return @"circle";
