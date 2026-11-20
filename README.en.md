@@ -4,7 +4,7 @@
 
 ![Full-screen completion overlay](Docs/completion-overlay.png)
 
-A native macOS menu bar utility for monitoring local Codex task activity, the five-hour quota, and the weekly quota.
+A native macOS menu bar utility for monitoring local Codex task activity and the weekly quota.
 
 > This is an independent local utility, not an official OpenAI product.
 
@@ -16,11 +16,11 @@ A native macOS menu bar utility for monitoring local Codex task activity, the fi
 - Shows a full-screen completion overlay with a high-resolution character and live frosted-glass background on the display containing the pointer.
 - Questions from `request_user_input` or `request_user_input_async` also trigger an overlay and mark the task as waiting for input. A reply resumes the working state; ordinary progress messages do not trigger alerts.
 - Toggle overlays with “全屏提醒（完成 / 等待回复）” in the menu. The setting persists across restarts; turning it off fades out the current overlay and clears queued overlays.
-- Choose an animated GIF or static image with “更换提示图片…”. The file is copied into local Application Support and retained across restarts. Preview the overlay or restore the default image from the menu. GIF playback stops when the overlay is hidden.
+- Choose an animated GIF or static image with “更换提示图片…”. The file is copied into local Application Support and retained across restarts. Preview the overlay from the menu. GIF playback stops when the overlay is hidden.
 - Images are centered. GIFs fit within a 600-by-600-point display area; static images are never enlarged beyond their original pixel dimensions. The surrounding area retains the full-screen frosted-glass effect.
 - Completion events are deduplicated by conversation and timestamp. Events from before launch are ignored, and completions received during an overlay are merged into it instead of queued for later.
 - Fades in over 0.8 seconds. Keyboard input, mouse movement, clicks, or scrolling dismiss the overlay; it can finish disappearing after one second and otherwise stays for at most one minute.
-- Refreshes the five-hour and weekly quotas every 60 seconds. The menu bar shows only the weekly quota (for example, `周 65%`); the five-hour quota and task details remain in the expanded menu.
+- Refreshes quota data every 60 seconds. The menu bar and expanded menu show the weekly quota (for example, `周 65%`). Task rows show the Codex conversation title after each activity label.
 
 ## Architecture
 
@@ -75,7 +75,7 @@ The utility reads the local thread index and lifecycle events under `~/.codex`, 
 
 ## Known Limitations
 
-- Five-hour and weekly quota availability depend on the current Codex app-server response. The app displays `--` when either window is absent.
+- Weekly quota availability depends on the current Codex app-server response. The app displays `--` when that window is absent.
 - macOS does not expose a public API for the exact combined width of all menu bar extras. The app detects truncation of its own title but cannot reliably tell when the system entirely moves the item into overflow.
 
 ## License

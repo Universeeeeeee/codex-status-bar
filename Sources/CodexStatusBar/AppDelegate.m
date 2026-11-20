@@ -15,12 +15,10 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
 @property(nonatomic) NSMenuItem *statusMenuItem;
 @property(nonatomic) NSMenuItem *tasksSeparator;
 @property(nonatomic) NSArray<NSMenuItem *> *taskMenuItems;
-@property(nonatomic) NSMenuItem *fiveHourMenuItem;
 @property(nonatomic) NSMenuItem *weeklyMenuItem;
 @property(nonatomic) NSMenuItem *updatedMenuItem;
 @property(nonatomic) NSMenuItem *menuSpaceWarningItem;
 @property(nonatomic) NSMenuItem *completionAlertsMenuItem;
-@property(nonatomic) NSMenuItem *restoreCompletionImageMenuItem;
 @property(nonatomic) NSTimer *statusTimer;
 @property(nonatomic) NSTimer *quotaTimer;
 @property(nonatomic) CSActivity activity;
@@ -72,7 +70,6 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     self.menu = menu;
     menu.delegate = self;
     self.statusMenuItem = [[NSMenuItem alloc] initWithTitle:@"状态：读取中" action:nil keyEquivalent:@""];
-    self.fiveHourMenuItem = [[NSMenuItem alloc] initWithTitle:@"5 小时额度：读取中" action:nil keyEquivalent:@""];
     self.weeklyMenuItem = [[NSMenuItem alloc] initWithTitle:@"周额度：读取中" action:nil keyEquivalent:@""];
     self.updatedMenuItem = [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
     self.menuSpaceWarningItem = [[NSMenuItem alloc] initWithTitle:@"菜单栏空间不足：额度文字可能被截断" action:nil keyEquivalent:@""];
@@ -81,7 +78,7 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     self.tasksSeparator = NSMenuItem.separatorItem;
     [menu addItem:self.tasksSeparator];
 
-    for (NSMenuItem *item in @[self.fiveHourMenuItem, self.weeklyMenuItem, self.updatedMenuItem]) {
+    for (NSMenuItem *item in @[self.weeklyMenuItem, self.updatedMenuItem]) {
         item.enabled = NO;
         [menu addItem:item];
     }
@@ -100,10 +97,6 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     chooseImage.image = [NSImage imageWithSystemSymbolName:@"photo" accessibilityDescription:@"更换提示图片"];
     [menu addItem:chooseImage];
 
-    self.restoreCompletionImageMenuItem = [[NSMenuItem alloc] initWithTitle:@"恢复默认图片" action:@selector(restoreCompletionImage:) keyEquivalent:@""];
-    self.restoreCompletionImageMenuItem.target = self;
-    [menu addItem:self.restoreCompletionImageMenuItem];
-
     NSMenuItem *preview = [[NSMenuItem alloc] initWithTitle:@"预览全屏提示" action:@selector(previewCompletionImage:) keyEquivalent:@""];
     preview.target = self;
     preview.image = [NSImage imageWithSystemSymbolName:@"play.rectangle" accessibilityDescription:@"预览全屏提示"];
@@ -114,11 +107,6 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     refresh.target = self;
     refresh.image = [NSImage imageWithSystemSymbolName:@"arrow.clockwise" accessibilityDescription:@"刷新额度"];
     [menu addItem:refresh];
-
-    NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"退出 Codex 状态" action:@selector(quit) keyEquivalent:@"q"];
-    quit.target = self;
-    quit.image = [NSImage imageWithSystemSymbolName:@"power" accessibilityDescription:@"退出"];
-    [menu addItem:quit];
 
     self.statusItem.menu = menu;
     self.statusItem.button.toolTip = @"Codex 状态与额度";
@@ -291,7 +279,6 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     self.statusMenuItem.title = [NSString stringWithFormat:@"任务：待回复 %ld · 开发中 %ld · 已完成 %ld · 闲置 %ld", waitingCount, workingCount, completedCount, idleCount];
     self.statusMenuItem.image = [self symbolImage:symbol];
     [self renderTaskItems];
-    self.fiveHourMenuItem.title = [self detailForTitle:@"5 小时额度" bucket:self.rateLimits.fiveHour];
     self.weeklyMenuItem.title = [self detailForTitle:@"周额度" bucket:self.rateLimits.weekly];
     if (self.quotaError) self.updatedMenuItem.title = [NSString stringWithFormat:@"额度读取失败：%@", self.quotaError];
 }

@@ -256,12 +256,12 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
     // ("no such index"), 语句为 NULL, 整个任务列表会变成空的。所以准备失败时回退到
     // 不带 INDEXED BY 的同一条查询 —— 计划可能变差, 但结果始终正确。
     static const char *sqlIndexed =
-        "SELECT id, title, rollout_path, updated_at_ms FROM threads "
+        "SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), '未命名任务'), rollout_path, updated_at_ms FROM threads "
         "INDEXED BY idx_threads_updated_at_ms "
         "WHERE archived = 0 AND thread_source = 'user' "
         "ORDER BY updated_at_ms DESC LIMIT 100";
     static const char *sqlFallback =
-        "SELECT id, title, rollout_path, updated_at_ms FROM threads "
+        "SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), '未命名任务'), rollout_path, updated_at_ms FROM threads "
         "WHERE archived = 0 AND thread_source = 'user' "
         "ORDER BY updated_at_ms DESC LIMIT 100";
 
