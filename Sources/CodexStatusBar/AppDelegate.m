@@ -5,6 +5,108 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled";
+static const CGFloat CSMenuWidth = 366;
+
+@interface CSMenuTaskView : NSView
+- (instancetype)initWithStatus:(NSString *)status
+                          title:(NSString *)title
+                      symbolName:(NSString *)symbolName
+                           color:(NSColor *)color
+                          header:(BOOL)header;
+- (void)updateStatus:(NSString *)status
+                title:(NSString *)title
+            symbolName:(NSString *)symbolName
+                 color:(NSColor *)color;
+@end
+
+@interface CSMenuInfoView : NSView
+- (instancetype)initWithLabel:(NSString *)label detail:(NSString *)detail muted:(BOOL)muted;
+- (void)updateLabel:(NSString *)label detail:(NSString *)detail;
+@end
+
+@implementation CSMenuTaskView {
+    NSImageView *_iconView;
+    NSTextField *_statusField;
+    NSTextField *_titleField;
+}
+
+- (instancetype)initWithStatus:(NSString *)status
+                          title:(NSString *)title
+                      symbolName:(NSString *)symbolName
+                           color:(NSColor *)color
+                          header:(BOOL)header {
+    CGFloat height = header ? 32 : 28;
+    self = [super initWithFrame:NSMakeRect(0, 0, CSMenuWidth, height)];
+    if (!self) return nil;
+    _iconView = [[NSImageView alloc] initWithFrame:NSMakeRect(16, (height - 18) / 2, 18, 18)];
+    _iconView.imageScaling = NSImageScaleProportionallyUpOrDown;
+    [self addSubview:_iconView];
+
+    _statusField = [NSTextField labelWithString:@""];
+    _statusField.frame = NSMakeRect(42, (height - 20) / 2, header ? 36 : 57, 20);
+    _statusField.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+    _statusField.lineBreakMode = NSLineBreakByTruncatingTail;
+    [self addSubview:_statusField];
+
+    _titleField = [NSTextField labelWithString:@""];
+    CGFloat titleX = header ? 80 : 104;
+    _titleField.frame = NSMakeRect(titleX, (height - 20) / 2, CSMenuWidth - titleX - 16, 20);
+    _titleField.font = [NSFont systemFontOfSize:13];
+    _titleField.textColor = header ? NSColor.secondaryLabelColor : NSColor.labelColor;
+    _titleField.lineBreakMode = NSLineBreakByTruncatingTail;
+    [self addSubview:_titleField];
+    [self updateStatus:status title:title symbolName:symbolName color:color];
+    return self;
+}
+
+- (void)updateStatus:(NSString *)status
+                title:(NSString *)title
+            symbolName:(NSString *)symbolName
+                 color:(NSColor *)color {
+    _statusField.stringValue = status ?: @"";
+    _titleField.stringValue = title ?: @"";
+    _statusField.textColor = color ?: NSColor.secondaryLabelColor;
+    NSImage *image = [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:nil];
+    if (image) {
+        image = [image imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:16 weight:NSFontWeightMedium]];
+        image.template = YES;
+        _iconView.image = image;
+        _iconView.contentTintColor = color ?: NSColor.secondaryLabelColor;
+    }
+}
+@end
+
+@implementation CSMenuInfoView {
+    NSTextField *_labelField;
+    NSTextField *_detailField;
+}
+
+- (instancetype)initWithLabel:(NSString *)label detail:(NSString *)detail muted:(BOOL)muted {
+    CGFloat height = muted ? 24 : 30;
+    self = [super initWithFrame:NSMakeRect(0, 0, CSMenuWidth, height)];
+    if (!self) return nil;
+    _labelField = [NSTextField labelWithString:@""];
+    _labelField.frame = NSMakeRect(16, (height - 20) / 2, 60, 20);
+    _labelField.font = [NSFont systemFontOfSize:muted ? 12 : 13 weight:muted ? NSFontWeightRegular : NSFontWeightSemibold];
+    _labelField.textColor = NSColor.secondaryLabelColor;
+    [self addSubview:_labelField];
+
+    _detailField = [NSTextField labelWithString:@""];
+    _detailField.frame = NSMakeRect(80, (height - 20) / 2, CSMenuWidth - 96, 20);
+    _detailField.font = [NSFont systemFontOfSize:muted ? 12 : 13];
+    _detailField.textColor = muted ? NSColor.secondaryLabelColor : NSColor.labelColor;
+    _detailField.lineBreakMode = NSLineBreakByTruncatingTail;
+    [self addSubview:_detailField];
+    [self updateLabel:label detail:detail];
+    return self;
+}
+
+- (void)updateLabel:(NSString *)label detail:(NSString *)detail {
+    _labelField.stringValue = label;
+    _detailField.stringValue = detail;
+    self.toolTip = [NSString stringWithFormat:@"%@ %@", label, detail];
+}
+@end
 
 @interface CSAppDelegate ()
 @property(nonatomic) NSStatusItem *statusItem;
@@ -13,10 +115,12 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
 @property(nonatomic) CSCompletionOverlay *completionOverlay;
 @property(nonatomic) NSMenu *menu;
 @property(nonatomic) NSMenuItem *statusMenuItem;
-@property(nonatomic) NSMenuItem *tasksSeparator;
 @property(nonatomic) NSArray<NSMenuItem *> *taskMenuItems;
 @property(nonatomic) NSMenuItem *weeklyMenuItem;
 @property(nonatomic) NSMenuItem *updatedMenuItem;
+@property(nonatomic) CSMenuTaskView *statusHeaderView;
+@property(nonatomic) CSMenuInfoView *weeklyInfoView;
+@property(nonatomic) CSMenuInfoView *updatedInfoView;
 @property(nonatomic) NSMenuItem *menuSpaceWarningItem;
 @property(nonatomic) NSMenuItem *completionAlertsMenuItem;
 @property(nonatomic) NSTimer *statusTimer;
@@ -24,7 +128,6 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
 @property(nonatomic) CSActivity activity;
 @property(nonatomic) NSArray<CSSessionItem *> *sessions;
 @property(nonatomic) CSRateSnapshot *rateLimits;
-@property(nonatomic) NSString *quotaError;
 @property(nonatomic) BOOL statusRefreshInFlight;
 @property(nonatomic) CSCompletionTracker *completionTracker;
 @property(nonatomic) dispatch_queue_t scanQueue;
@@ -74,14 +177,23 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     self.updatedMenuItem = [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
     self.menuSpaceWarningItem = [[NSMenuItem alloc] initWithTitle:@"菜单栏空间不足：额度文字可能被截断" action:nil keyEquivalent:@""];
     self.statusMenuItem.enabled = NO;
+    self.statusHeaderView = [[CSMenuTaskView alloc] initWithStatus:@"任务"
+                                                               title:@"读取中"
+                                                           symbolName:@"hammer.fill"
+                                                                color:NSColor.secondaryLabelColor
+                                                               header:YES];
+    self.statusMenuItem.view = self.statusHeaderView;
     [menu addItem:self.statusMenuItem];
-    self.tasksSeparator = NSMenuItem.separatorItem;
-    [menu addItem:self.tasksSeparator];
+    [menu addItem:NSMenuItem.separatorItem];
 
     for (NSMenuItem *item in @[self.weeklyMenuItem, self.updatedMenuItem]) {
         item.enabled = NO;
         [menu addItem:item];
     }
+    self.weeklyInfoView = [[CSMenuInfoView alloc] initWithLabel:@"周额度" detail:@"读取中" muted:NO];
+    self.weeklyMenuItem.view = self.weeklyInfoView;
+    self.updatedInfoView = [[CSMenuInfoView alloc] initWithLabel:@"更新于" detail:@"读取中" muted:YES];
+    self.updatedMenuItem.view = self.updatedInfoView;
     self.menuSpaceWarningItem.enabled = NO;
     self.menuSpaceWarningItem.hidden = YES;
     [menu addItem:self.menuSpaceWarningItem];
@@ -89,6 +201,7 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
 
     self.completionAlertsMenuItem = [[NSMenuItem alloc] initWithTitle:@"全屏提醒（完成 / 等待回复）" action:@selector(toggleCompletionAlerts:) keyEquivalent:@""];
     self.completionAlertsMenuItem.target = self;
+    self.completionAlertsMenuItem.image = [self symbolImage:@"bell"];
     self.completionAlertsMenuItem.state = [NSUserDefaults.standardUserDefaults boolForKey:CSCompletionAlertsEnabledKey] ? NSControlStateValueOn : NSControlStateValueOff;
     [menu addItem:self.completionAlertsMenuItem];
 
@@ -106,6 +219,8 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     NSMenuItem *refresh = [[NSMenuItem alloc] initWithTitle:@"刷新额度" action:@selector(refreshQuota) keyEquivalent:@"r"];
     refresh.target = self;
     refresh.image = [NSImage imageWithSystemSymbolName:@"arrow.clockwise" accessibilityDescription:@"刷新额度"];
+    refresh.attributedTitle = [[NSAttributedString alloc] initWithString:refresh.title
+        attributes:@{NSFontAttributeName: [NSFont systemFontOfSize:[NSFont menuFontOfSize:0].pointSize weight:NSFontWeightSemibold]}];
     [menu addItem:refresh];
 
     self.statusItem.menu = menu;
@@ -232,12 +347,17 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
 
 - (void)refreshQuota {
     self.updatedMenuItem.title = @"额度更新中…";
+    [self.updatedInfoView updateLabel:@"额度" detail:@"更新中…"];
     __weak typeof(self) weakSelf = self;
     [self.client fetchRateLimits:^(CSRateSnapshot *snapshot, NSError *error) {
-        weakSelf.rateLimits = CSMergeRateSnapshots(weakSelf.rateLimits, snapshot);
-        weakSelf.quotaError = error.localizedDescription;
-        if (!error) weakSelf.updatedMenuItem.title = [NSString stringWithFormat:@"更新于 %@", [weakSelf.class.timeFormatter stringFromDate:NSDate.date]];
-        [weakSelf render];
+        CSAppDelegate *delegate = weakSelf;
+        if (!delegate) return;
+        delegate.rateLimits = CSMergeRateSnapshots(delegate.rateLimits, snapshot);
+        NSString *label = error ? @"读取失败" : @"更新于";
+        NSString *detail = error ? error.localizedDescription : [delegate.class.timeFormatter stringFromDate:NSDate.date];
+        delegate.updatedMenuItem.title = [NSString stringWithFormat:@"%@ %@", label, detail];
+        [delegate.updatedInfoView updateLabel:label detail:detail];
+        [delegate render];
     }];
 }
 
@@ -252,7 +372,6 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     NSInteger waitingCount = [self countForActivity:CSActivityWaitingForInput];
     self.activity = CSAggregateSessionActivity(self.sessions);
 
-    NSString *activityTitle = [self titleForActivity:self.activity];
     NSString *symbol = [self symbolForActivity:self.activity];
     NSString *weekly = self.rateLimits.weekly ? [NSString stringWithFormat:@"%ld%%", self.rateLimits.weekly.remainingPercent] : @"--";
 
@@ -276,11 +395,13 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
             [weakSelf updateMenuBarTruncationWarning];
         });
     }
-    self.statusMenuItem.title = [NSString stringWithFormat:@"任务：待回复 %ld · 开发中 %ld · 已完成 %ld · 闲置 %ld", waitingCount, workingCount, completedCount, idleCount];
-    self.statusMenuItem.image = [self symbolImage:symbol];
+    NSString *summary = [NSString stringWithFormat:@"待回复 %ld · 开发中 %ld · 已完成 %ld · 闲置 %ld", waitingCount, workingCount, completedCount, idleCount];
+    self.statusMenuItem.title = [NSString stringWithFormat:@"任务：%@", summary];
+    [self.statusHeaderView updateStatus:@"任务" title:summary symbolName:symbol color:[self colorForActivity:self.activity]];
     [self renderTaskItems];
-    self.weeklyMenuItem.title = [self detailForTitle:@"周额度" bucket:self.rateLimits.weekly];
-    if (self.quotaError) self.updatedMenuItem.title = [NSString stringWithFormat:@"额度读取失败：%@", self.quotaError];
+    NSString *weeklyDetail = [self detailForBucket:self.rateLimits.weekly];
+    self.weeklyMenuItem.title = [NSString stringWithFormat:@"周额度：%@", weeklyDetail];
+    [self.weeklyInfoView updateLabel:@"周额度" detail:weeklyDetail];
 }
 
 - (void)updateMenuBarTruncationWarning {
@@ -307,12 +428,17 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
         [items addObject:empty];
     } else {
         for (CSSessionItem *session in self.sessions) {
-            NSString *title = [self compactTitle:session.title maximumLength:34];
-            NSString *itemTitle = [NSString stringWithFormat:@"%@  %@", [self titleForActivity:session.activity], title];
+            NSString *title = [[session.title componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] componentsJoinedByString:@" "];
+            NSString *status = [self titleForActivity:session.activity];
+            NSString *itemTitle = [NSString stringWithFormat:@"%@  %@", status, title];
             NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:itemTitle action:nil keyEquivalent:@""];
             item.enabled = NO;
-            item.indentationLevel = 1;
-            item.image = [self symbolImage:[self symbolForActivity:session.activity]];
+            item.view = [[CSMenuTaskView alloc] initWithStatus:status
+                                                          title:title
+                                                      symbolName:[self symbolForActivity:session.activity]
+                                                           color:[self colorForActivity:session.activity]
+                                                          header:NO];
+            item.view.toolTip = title;
             [self.menu insertItem:item atIndex:insertionIndex++];
             [items addObject:item];
         }
@@ -326,17 +452,10 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     }].count;
 }
 
-- (NSString *)compactTitle:(NSString *)title maximumLength:(NSUInteger)maximumLength {
-    NSString *singleLine = [[title componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] componentsJoinedByString:@" "];
-    if (singleLine.length <= maximumLength) return singleLine;
-    NSRange range = [singleLine rangeOfComposedCharacterSequencesForRange:NSMakeRange(0, maximumLength)];
-    return [[singleLine substringWithRange:range] stringByAppendingString:@"…"];
-}
-
-- (NSString *)detailForTitle:(NSString *)title bucket:(CSRateBucket *)bucket {
-    if (!bucket) return [NSString stringWithFormat:@"%@：当前账号未返回", title];
+- (NSString *)detailForBucket:(CSRateBucket *)bucket {
+    if (!bucket) return @"当前账号未返回";
     NSDate *resetDate = [NSDate dateWithTimeIntervalSince1970:bucket.resetsAt];
-    return [NSString stringWithFormat:@"%@：剩余 %ld%% · %@ 重置", title, bucket.remainingPercent, [self.class.resetFormatter stringFromDate:resetDate]];
+    return [NSString stringWithFormat:@"剩余 %ld%% · %@ 重置", bucket.remainingPercent, [self.class.resetFormatter stringFromDate:resetDate]];
 }
 
 - (NSString *)titleForActivity:(CSActivity)activity {
@@ -344,6 +463,13 @@ static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled
     if (activity == CSActivityWorking) return @"开发中";
     if (activity == CSActivityCompleted) return @"已完成";
     return @"闲置";
+}
+
+- (NSColor *)colorForActivity:(CSActivity)activity {
+    if (activity == CSActivityWaitingForInput) return NSColor.systemOrangeColor;
+    if (activity == CSActivityWorking) return NSColor.controlAccentColor;
+    if (activity == CSActivityCompleted) return NSColor.systemGreenColor;
+    return NSColor.secondaryLabelColor;
 }
 
 - (NSString *)symbolForActivity:(CSActivity)activity {
