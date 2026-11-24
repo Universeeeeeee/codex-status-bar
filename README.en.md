@@ -4,7 +4,7 @@
 
 A macOS menu bar utility for keeping track of Codex chats. See your weekly quota at a glance and open the menu to find tasks that are running, waiting for you, or ready to read.
 
-![Full-screen alert preview](Docs/completion-overlay.png)
+![Menu bar preview](Docs/status-menu.png)
 
 ## Install
 
@@ -23,6 +23,8 @@ The build produces `outputs/Codex Status.app`. Move it to Applications for regul
 - **Check tasks and quota.** Hover over the status item for about 0.3 seconds or click it to open the menu. A menu opened by hovering closes when you move away from both the item and the menu. Press `⌘R` to refresh the quota.
 - **Open a chat.** With the Codex desktop app installed, click anywhere in a task row to open its local conversation.
 - **Get full-screen alerts.** Enable alerts when a task completes or asks for input. You can choose a GIF or still image and preview the alert from the menu.
+
+![Full-screen alert preview](Docs/completion-overlay.png)
 
 ## Task states
 
