@@ -23,9 +23,11 @@ static int RunSelfTests(void) {
 
     NSDate *now = [NSDate dateWithTimeIntervalSince1970:100000];
     CSActivity visibleActivity;
-    if (!CSVisibleSessionActivity(CSActivityCompleted, [now dateByAddingTimeInterval:-9 * 60], now, &visibleActivity) || visibleActivity != CSActivityCompleted) return 6;
-    if (!CSVisibleSessionActivity(CSActivityCompleted, [now dateByAddingTimeInterval:-11 * 60], now, &visibleActivity) || visibleActivity != CSActivityIdle) return 7;
-    if (CSVisibleSessionActivity(CSActivityIdle, [now dateByAddingTimeInterval:-(5 * 60 * 60 + 1)], now, &visibleActivity)) return 8;
+    if (!CSVisibleSessionActivity(CSActivityCompleted, [now dateByAddingTimeInterval:-30 * 60], now, &visibleActivity) || visibleActivity != CSActivityCompleted) return 6;
+    if (!CSVisibleSessionActivity(CSActivityCompleted, [now dateByAddingTimeInterval:-(30 * 60 + 1)], now, &visibleActivity) || visibleActivity != CSActivityIdle) return 7;
+    if (CSVisibleSessionActivity(CSActivityIdle, [now dateByAddingTimeInterval:-(2 * 60 * 60 + 1)], now, &visibleActivity)) return 8;
+    if (!CSVisibleSessionActivity(CSActivityCompleted, [now dateByAddingTimeInterval:-2 * 60 * 60], now, &visibleActivity) || visibleActivity != CSActivityIdle) return 32;
+    if (CSVisibleSessionActivity(CSActivityCompleted, [now dateByAddingTimeInterval:-(2 * 60 * 60 + 1)], now, &visibleActivity)) return 33;
     if (!CSVisibleSessionActivity(CSActivityWorking, [now dateByAddingTimeInterval:-6 * 60 * 60], now, &visibleActivity) || visibleActivity != CSActivityWorking) return 9;
 
     CSSessionItem *completedTask = [CSSessionItem new];

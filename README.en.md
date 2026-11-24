@@ -12,7 +12,7 @@ A native macOS menu bar utility for monitoring local Codex task activity and the
 
 - Refreshes task activity every three seconds from the local Codex thread index and lifecycle events, including concurrent and cross-day tasks.
 - Lists each user conversation independently as **Working**, **Completed**, or **Idle**. Internal subagents are excluded.
-- Keeps completed tasks for ten minutes, then removes idle tasks after five hours.
+- Shows tasks as completed for 30 minutes before marking them idle. On refresh, idle tasks disappear once more than two hours have passed since the last activity, including the time shown as completed.
 - Shows a full-screen completion overlay with a high-resolution character and live frosted-glass background on the display containing the pointer.
 - Questions from `request_user_input` or `request_user_input_async` also trigger an overlay and mark the task as waiting for input. A reply resumes the working state; ordinary progress messages do not trigger alerts.
 - Toggle overlays with “全屏提醒（完成 / 等待回复）” in the menu. The setting persists across restarts; turning it off fades out the current overlay and clears queued overlays.

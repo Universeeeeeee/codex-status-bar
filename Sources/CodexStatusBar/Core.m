@@ -3,7 +3,7 @@
 #import <sys/stat.h>
 
 // 会话在菜单里可见的时间窗 (与 CSVisibleSessionActivity 保持一致)
-static const NSTimeInterval CSVisibilityWindow = 5 * 60 * 60;
+static const NSTimeInterval CSVisibilityWindow = 2 * 60 * 60;
 
 @implementation CSRateBucket
 - (NSInteger)remainingPercent {
@@ -125,7 +125,7 @@ CSActivity CSParseSessionData(NSData *data, NSDate **eventDate) {
 BOOL CSVisibleSessionActivity(CSActivity rawActivity, NSDate *lastActivityAt, NSDate *now, CSActivity *visibleActivity) {
     CSActivity resolved = rawActivity;
     NSTimeInterval idleDuration = [now timeIntervalSinceDate:lastActivityAt];
-    if (resolved == CSActivityCompleted && idleDuration > 10 * 60) resolved = CSActivityIdle;
+    if (resolved == CSActivityCompleted && idleDuration > 30 * 60) resolved = CSActivityIdle;
     if (visibleActivity) *visibleActivity = resolved;
     return resolved != CSActivityIdle || idleDuration <= CSVisibilityWindow;
 }
@@ -300,10 +300,10 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
 
             NSDate *updatedAt = [NSDate dateWithTimeIntervalSince1970:updatedSeconds];
 
-            // 这里曾经加过一层"老会话预筛"(缓存中非 Working 且超出 5 小时就 continue),
+            // 这里曾经加过一层"老会话预筛"(缓存中非 Working 且超出可见时间窗就 continue),
             // 但它优先采用缓存的 eventDate, 会忽略数据库里刚刷新的 updated_at_ms:
             // 昨天完成的会话今天继续提问时, 数据库时间已更新, 预筛仍按昨天的缓存时间判定
-            // "超过 5 小时"而跳过, 且每轮都跳 —— 该会话会被永久跳过, 完成提醒也随之丢失。
+            // 超出可见时间窗而跳过, 且每轮都跳 —— 该会话会被永久跳过, 完成提醒也随之丢失。
             // 换成裸 stat() 之后, 不预筛的代价只有每轮约 100 次 stat (约 0.1ms),
             // 收益微乎其微, 所以直接去掉, 完全恢复原本的可见性语义。
             CSSessionCacheEntry *state = [self stateForRolloutPath:rolloutPath];

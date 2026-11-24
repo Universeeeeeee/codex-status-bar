@@ -422,7 +422,7 @@ static const CGFloat CSMenuWidth = 366;
     NSInteger insertionIndex = 1;
 
     if (!self.sessions.count) {
-        NSMenuItem *empty = [[NSMenuItem alloc] initWithTitle:@"近 5 小时无任务" action:nil keyEquivalent:@""];
+        NSMenuItem *empty = [[NSMenuItem alloc] initWithTitle:@"近 2 小时无任务" action:nil keyEquivalent:@""];
         empty.enabled = NO;
         [self.menu insertItem:empty atIndex:insertionIndex];
         [items addObject:empty];
