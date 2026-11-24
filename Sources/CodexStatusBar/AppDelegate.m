@@ -5,7 +5,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 static NSString * const CSCompletionAlertsEnabledKey = @"CompletionAlertsEnabled";
-static const CGFloat CSMenuWidth = 366;
+static const CGFloat CSMenuWidth = 440;
 
 @interface CSMenuTaskView : NSView
 - (instancetype)initWithStatus:(NSString *)status
@@ -28,6 +28,7 @@ static const CGFloat CSMenuWidth = 366;
     NSImageView *_iconView;
     NSTextField *_statusField;
     NSTextField *_titleField;
+    BOOL _hovered;
 }
 
 - (instancetype)initWithStatus:(NSString *)status
@@ -35,9 +36,10 @@ static const CGFloat CSMenuWidth = 366;
                       symbolName:(NSString *)symbolName
                            color:(NSColor *)color
                           header:(BOOL)header {
-    CGFloat height = header ? 32 : 28;
+    CGFloat height = 32;
     self = [super initWithFrame:NSMakeRect(0, 0, CSMenuWidth, height)];
     if (!self) return nil;
+    self.autoresizingMask = NSViewWidthSizable;
     _iconView = [[NSImageView alloc] initWithFrame:NSMakeRect(16, (height - 18) / 2, 18, 18)];
     _iconView.imageScaling = NSImageScaleProportionallyUpOrDown;
     [self addSubview:_iconView];
@@ -51,12 +53,59 @@ static const CGFloat CSMenuWidth = 366;
     _titleField = [NSTextField labelWithString:@""];
     CGFloat titleX = header ? 80 : 104;
     _titleField.frame = NSMakeRect(titleX, (height - 20) / 2, CSMenuWidth - titleX - 16, 20);
+    _titleField.autoresizingMask = NSViewWidthSizable;
     _titleField.font = [NSFont systemFontOfSize:13];
     _titleField.textColor = header ? NSColor.secondaryLabelColor : NSColor.labelColor;
     _titleField.lineBreakMode = NSLineBreakByTruncatingTail;
     [self addSubview:_titleField];
+    if (!header) {
+        [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+            options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+            owner:self userInfo:nil]];
+    }
     [self updateStatus:status title:title symbolName:symbolName color:color];
     return self;
+}
+
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    _hovered = NO;
+    self.needsDisplay = YES;
+}
+
+- (void)mouseEntered:(NSEvent *)event {
+    _hovered = self.enclosingMenuItem.isEnabled;
+    self.needsDisplay = YES;
+}
+
+- (void)mouseExited:(NSEvent *)event {
+    _hovered = NO;
+    self.needsDisplay = YES;
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    [super drawRect:dirtyRect];
+    if (!_hovered) return;
+    [[NSColor.selectedContentBackgroundColor colorWithAlphaComponent:0.16] setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 4, 1) xRadius:5 yRadius:5] fill];
+}
+
+- (NSView *)hitTest:(NSPoint)point {
+    NSView *hit = [super hitTest:point];
+    return hit && self.enclosingMenuItem.action ? self : hit;
+}
+
+- (void)mouseUp:(NSEvent *)event {
+    if (NSPointInRect([self convertPoint:event.locationInWindow fromView:nil], self.bounds)) {
+        [self accessibilityPerformPress];
+    }
+}
+
+- (BOOL)accessibilityPerformPress {
+    NSMenuItem *item = self.enclosingMenuItem;
+    if (!item.isEnabled || !item.action) return NO;
+    [item.menu cancelTracking];
+    return [NSApp sendAction:item.action to:item.target from:item];
 }
 
 - (void)updateStatus:(NSString *)status
@@ -125,6 +174,13 @@ static const CGFloat CSMenuWidth = 366;
 @property(nonatomic) NSMenuItem *completionAlertsMenuItem;
 @property(nonatomic) NSTimer *statusTimer;
 @property(nonatomic) NSTimer *quotaTimer;
+@property(nonatomic) id globalMouseMonitor;
+@property(nonatomic) id localMouseMonitor;
+@property(nonatomic) NSTimer *hoverOpenTimer;
+@property(nonatomic) NSTimer *hoverCloseTimer;
+@property(nonatomic) NSTimeInterval lastPointerInside;
+@property(nonatomic) BOOL menuOpen;
+@property(nonatomic) BOOL waitForPointerExit;
 @property(nonatomic) CSActivity activity;
 @property(nonatomic) NSArray<CSSessionItem *> *sessions;
 @property(nonatomic) CSRateSnapshot *rateLimits;
@@ -153,6 +209,14 @@ static const CGFloat CSMenuWidth = 366;
     self.completionTracker = [CSCompletionTracker new];
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSVariableStatusItemLength];
     [self configureMenu];
+    __weak typeof(self) weakSelf = self;
+    self.globalMouseMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskMouseMoved handler:^(NSEvent *event) {
+        [weakSelf updateMenuHover];
+    }];
+    self.localMouseMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskMouseMoved handler:^NSEvent *(NSEvent *event) {
+        [weakSelf updateMenuHover];
+        return event;
+    }];
     [self refreshStatus];
     [self refreshQuota];
 
@@ -166,6 +230,10 @@ static const CGFloat CSMenuWidth = 366;
 - (void)applicationWillTerminate:(NSNotification *)notification {
     [self.statusTimer invalidate];
     [self.quotaTimer invalidate];
+    [self.hoverOpenTimer invalidate];
+    [self.hoverCloseTimer invalidate];
+    if (self.globalMouseMonitor) [NSEvent removeMonitor:self.globalMouseMonitor];
+    if (self.localMouseMonitor) [NSEvent removeMonitor:self.localMouseMonitor];
 }
 
 - (void)configureMenu {
@@ -228,7 +296,61 @@ static const CGFloat CSMenuWidth = 366;
 }
 
 - (void)menuWillOpen:(NSMenu *)menu {
+    self.menuOpen = YES;
+    [self.hoverOpenTimer invalidate];
+    self.hoverOpenTimer = nil;
     [self refreshStatus];
+}
+
+- (void)menuDidClose:(NSMenu *)menu {
+    self.menuOpen = NO;
+    self.waitForPointerExit = NSPointInRect(NSEvent.mouseLocation, [self statusButtonScreenRect]);
+}
+
+- (NSRect)statusButtonScreenRect {
+    NSStatusBarButton *button = self.statusItem.button;
+    if (!self.statusItem.isVisible || !button.window.isVisible) return NSZeroRect;
+    return [button.window convertRectToScreen:[button convertRect:button.visibleRect toView:nil]];
+}
+
+- (void)updateMenuHover {
+    if (self.menuOpen) return;
+    if (!NSPointInRect(NSEvent.mouseLocation, [self statusButtonScreenRect])) {
+        [self.hoverOpenTimer invalidate];
+        self.hoverOpenTimer = nil;
+        self.waitForPointerExit = NO;
+        return;
+    }
+    if (!self.waitForPointerExit && !self.hoverOpenTimer && !NSEvent.pressedMouseButtons) {
+        self.hoverOpenTimer = [NSTimer scheduledTimerWithTimeInterval:0.30 target:self
+                                                             selector:@selector(openHoveredMenu) userInfo:nil repeats:NO];
+    }
+}
+
+- (void)openHoveredMenu {
+    self.hoverOpenTimer = nil;
+    NSRect anchor = [self statusButtonScreenRect];
+    if (self.menuOpen || NSEvent.pressedMouseButtons || !NSPointInRect(NSEvent.mouseLocation, anchor)) return;
+
+    self.lastPointerInside = NSProcessInfo.processInfo.systemUptime;
+    self.hoverCloseTimer = [NSTimer timerWithTimeInterval:0.10 target:self
+                                                 selector:@selector(closeHoveredMenuIfNeeded) userInfo:nil repeats:YES];
+    [NSRunLoop.mainRunLoop addTimer:self.hoverCloseTimer forMode:NSEventTrackingRunLoopMode];
+    [self.statusItem.button performClick:nil];
+    [self.hoverCloseTimer invalidate];
+    self.hoverCloseTimer = nil;
+}
+
+- (void)closeHoveredMenuIfNeeded {
+    NSPoint pointer = NSEvent.mouseLocation;
+    NSRect menuFrame = self.menu.accessibilityFrame;
+    // Allow the pointer to cross the small gap between the button and the menu.
+    if (NSPointInRect(pointer, [self statusButtonScreenRect]) ||
+        (!NSIsEmptyRect(menuFrame) && NSPointInRect(pointer, NSInsetRect(menuFrame, -6, -6)))) {
+        self.lastPointerInside = NSProcessInfo.processInfo.systemUptime;
+    } else if (NSProcessInfo.processInfo.systemUptime - self.lastPointerInside >= 0.25) {
+        [self.menu cancelTracking];
+    }
 }
 
 - (NSURL *)completionImageURL {
@@ -431,19 +553,30 @@ static const CGFloat CSMenuWidth = 366;
             NSString *title = [[session.title componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] componentsJoinedByString:@" "];
             NSString *status = [self titleForActivity:session.activity];
             NSString *itemTitle = [NSString stringWithFormat:@"%@  %@", status, title];
-            NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:itemTitle action:nil keyEquivalent:@""];
-            item.enabled = NO;
+            NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:itemTitle action:@selector(openSession:) keyEquivalent:@""];
+            item.target = self;
+            item.representedObject = session.threadID;
             item.view = [[CSMenuTaskView alloc] initWithStatus:status
                                                           title:title
                                                       symbolName:[self symbolForActivity:session.activity]
                                                            color:[self colorForActivity:session.activity]
                                                           header:NO];
             item.view.toolTip = title;
+            [item.view setAccessibilityElement:YES];
+            [item.view setAccessibilityRole:NSAccessibilityButtonRole];
+            [item.view setAccessibilityLabel:itemTitle];
             [self.menu insertItem:item atIndex:insertionIndex++];
             [items addObject:item];
         }
     }
     self.taskMenuItems = items;
+}
+
+- (void)openSession:(NSMenuItem *)item {
+    NSString *threadID = item.representedObject;
+    if (![[NSUUID alloc] initWithUUIDString:threadID]) return;
+    NSURL *url = [NSURL URLWithString:[@"codex://threads/" stringByAppendingString:threadID]];
+    if (![NSWorkspace.sharedWorkspace openURL:url]) NSBeep();
 }
 
 - (NSInteger)countForActivity:(CSActivity)activity {

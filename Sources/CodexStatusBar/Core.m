@@ -46,6 +46,7 @@ static const NSTimeInterval CSVisibilityWindow = 2 * 60 * 60;
 @property(nonatomic) unsigned long long fileSize;
 @property(nonatomic) CSActivity activity;
 @property(nonatomic, nullable) NSDate *eventDate;
+@property(nonatomic, nullable) NSString *completedTurnID;
 @property(nonatomic, nullable) NSString *inputCallID;
 @property(nonatomic) BOOL inputIsAsync;
 @end
@@ -64,7 +65,7 @@ static NSDate *CSParseDate(NSString *value) {
 }
 
 static BOOL CSParseSessionUpdate(NSData *data, CSActivity *activity, NSDate **eventDate,
-                                 NSString **inputCallID, BOOL *inputIsAsync) {
+                                 NSString **inputCallID, BOOL *inputIsAsync, NSString **completedTurnID) {
     NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     if (!text) return NO;
 
@@ -103,6 +104,8 @@ static BOOL CSParseSessionUpdate(NSData *data, CSActivity *activity, NSDate **ev
             continue;
         }
         NSString *timestamp = [object[@"timestamp"] isKindOfClass:NSString.class] ? object[@"timestamp"] : nil;
+        id turnID = payload[@"turn_id"];
+        if (completedTurnID) *completedTurnID = next == CSActivityCompleted && [turnID isKindOfClass:NSString.class] ? turnID : nil;
         if (eventDate) *eventDate = timestamp ? CSParseDate(timestamp) : nil;
         if (activity) *activity = next;
         found = YES;
@@ -113,7 +116,7 @@ static BOOL CSParseSessionUpdate(NSData *data, CSActivity *activity, NSDate **ev
 BOOL CSTryParseSessionData(NSData *data, CSActivity *activity, NSDate **eventDate) {
     NSString *inputCallID = nil;
     BOOL inputIsAsync = NO;
-    return CSParseSessionUpdate(data, activity, eventDate, &inputCallID, &inputIsAsync);
+    return CSParseSessionUpdate(data, activity, eventDate, &inputCallID, &inputIsAsync, NULL);
 }
 
 CSActivity CSParseSessionData(NSData *data, NSDate **eventDate) {
@@ -255,24 +258,21 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
     // 但索引名是硬依赖: 万一 Codex 迁移 schema 时改名或删掉它, prepare 会直接失败
     // ("no such index"), 语句为 NULL, 整个任务列表会变成空的。所以准备失败时回退到
     // 不带 INDEXED BY 的同一条查询 —— 计划可能变差, 但结果始终正确。
-    static const char *sqlIndexed =
-        "SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), '未命名任务'), rollout_path, updated_at_ms FROM threads "
-        "INDEXED BY idx_threads_updated_at_ms "
-        "WHERE archived = 0 AND thread_source = 'user' "
-        "ORDER BY updated_at_ms DESC LIMIT 100";
-    static const char *sqlFallback =
-        "SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), '未命名任务'), rollout_path, updated_at_ms FROM threads "
-        "WHERE archived = 0 AND thread_source = 'user' "
-        "ORDER BY updated_at_ms DESC LIMIT 100";
-
-    if (sqlite3_prepare_v2(_database, sqlIndexed, -1, &_sessionsStatement, NULL) != SQLITE_OK) {
-        _sessionsStatement = NULL;
-        if (sqlite3_prepare_v2(_database, sqlFallback, -1, &_sessionsStatement, NULL) != SQLITE_OK) {
-            _sessionsStatement = NULL;
-            return NULL;
+    NSString *readTurn = @"(SELECT last_published_turn FROM thread_read_receipts "
+        "WHERE thread_id = threads.id AND first_unread_turn IS NULL)";
+    // 老版本没有已读回执表或对应字段时，继续按完成时间显示。
+    for (NSString *receipt in @[readTurn, @"NULL"]) {
+        for (NSString *indexHint in @[@"INDEXED BY idx_threads_updated_at_ms", @""]) {
+            NSString *sql = [NSString stringWithFormat:
+                @"SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), '未命名任务'), rollout_path, updated_at_ms, %@ "
+                "FROM threads %@ WHERE archived = 0 AND thread_source = 'user' ORDER BY updated_at_ms DESC LIMIT 100",
+                receipt, indexHint];
+            if (sqlite3_prepare_v2(_database, sql.UTF8String, -1, &_sessionsStatement, NULL) == SQLITE_OK) {
+                return _sessionsStatement;
+            }
         }
     }
-    return _sessionsStatement;
+    return NULL;
 }
 
 - (NSArray<CSSessionItem *> *)currentSessions {
@@ -308,8 +308,13 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
             // 收益微乎其微, 所以直接去掉, 完全恢复原本的可见性语义。
             CSSessionCacheEntry *state = [self stateForRolloutPath:rolloutPath];
             NSDate *lastActivityAt = state.eventDate ?: updatedAt;
+            CSActivity activity = state.activity;
+            if (activity == CSActivityCompleted && state.completedTurnID.length &&
+                [state.completedTurnID isEqualToString:[self stringAtColumn:4 statement:statement]]) {
+                activity = CSActivityIdle;
+            }
             CSActivity visibleActivity;
-            if (!CSVisibleSessionActivity(state.activity, lastActivityAt, now, &visibleActivity)) continue;
+            if (!CSVisibleSessionActivity(activity, lastActivityAt, now, &visibleActivity)) continue;
 
             CSSessionItem *item = [CSSessionItem new];
             item.threadID = threadID;
@@ -359,13 +364,14 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
 
     CSActivity activity = cached ? cached.activity : CSActivityIdle;
     NSDate *eventDate = cached.eventDate;
+    NSString *completedTurnID = cached.completedTurnID;
     NSString *inputCallID = cached.inputCallID;
     BOOL inputIsAsync = cached.inputIsAsync;
     BOOL found = NO;
     if (cached && size > cached.fileSize) {
         [handle seekToFileOffset:cached.fileSize];
         NSData *appended = [handle readDataToEndOfFile];
-        found = CSParseSessionUpdate(appended, &activity, &eventDate, &inputCallID, &inputIsAsync);
+        found = CSParseSessionUpdate(appended, &activity, &eventDate, &inputCallID, &inputIsAsync, &completedTurnID);
     } else {
         unsigned long long tailSize = 256 * 1024;
         if (size > tailSize) [handle seekToFileOffset:size - tailSize];
@@ -373,11 +379,11 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
         NSData *tail = [handle readDataToEndOfFile];
         inputCallID = nil;
         inputIsAsync = NO;
-        found = CSParseSessionUpdate(tail, &activity, &eventDate, &inputCallID, &inputIsAsync);
+        found = CSParseSessionUpdate(tail, &activity, &eventDate, &inputCallID, &inputIsAsync, &completedTurnID);
         if (!found && size > tailSize) {
             [handle seekToFileOffset:0];
             NSData *fullData = [handle readDataToEndOfFile];
-            found = CSParseSessionUpdate(fullData, &activity, &eventDate, &inputCallID, &inputIsAsync);
+            found = CSParseSessionUpdate(fullData, &activity, &eventDate, &inputCallID, &inputIsAsync, &completedTurnID);
         }
     }
     [handle closeFile];
@@ -387,6 +393,7 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
     if (found) {
         entry.activity = activity;
         entry.eventDate = eventDate;
+        entry.completedTurnID = completedTurnID;
         entry.inputCallID = inputCallID;
         entry.inputIsAsync = inputIsAsync;
     }

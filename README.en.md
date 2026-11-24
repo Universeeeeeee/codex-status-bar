@@ -11,8 +11,10 @@ A native macOS menu bar utility for monitoring local Codex task activity and the
 ## Features
 
 - Refreshes task activity every three seconds from the local Codex thread index and lifecycle events, including concurrent and cross-day tasks.
+- Hover over the menu bar item for about 0.3 seconds to open the menu. Move the pointer directly into the menu to use it, or away from both the item and menu to close it.
 - Lists each user conversation independently as **Working**, **Completed**, or **Idle**. Internal subagents are excluded.
-- Shows tasks as completed for 30 minutes before marking them idle. On refresh, idle tasks disappear once more than two hours have passed since the last activity, including the time shown as completed.
+- Click anywhere in a task row to open the corresponding local conversation in the Codex desktop app.
+- Shows tasks as completed for up to 30 minutes. When Codex marks the result as read, the next refresh marks the task idle. Idle tasks disappear once more than two hours have passed since the last activity, including the time shown as completed.
 - Shows a full-screen completion overlay with a high-resolution character and live frosted-glass background on the display containing the pointer.
 - Questions from `request_user_input` or `request_user_input_async` also trigger an overlay and mark the task as waiting for input. A reply resumes the working state; ordinary progress messages do not trigger alerts.
 - Toggle overlays with “全屏提醒（完成 / 等待回复）” in the menu. The setting persists across restarts; turning it off fades out the current overlay and clears queued overlays.
@@ -75,6 +77,7 @@ The utility reads the local thread index and lifecycle events under `~/.codex`, 
 
 ## Known Limitations
 
+- When an older Codex version provides no read receipts, completed tasks become idle after 30 minutes.
 - Weekly quota availability depends on the current Codex app-server response. The app displays `--` when that window is absent.
 - macOS does not expose a public API for the exact combined width of all menu bar extras. The app detects truncation of its own title but cannot reliably tell when the system entirely moves the item into overflow.
 
