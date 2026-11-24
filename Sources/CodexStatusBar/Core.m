@@ -2,8 +2,10 @@
 #import <sqlite3.h>
 #import <sys/stat.h>
 
-// 会话在菜单里可见的时间窗 (与 CSVisibleSessionActivity 保持一致)
+// 已读和闲置会话在菜单里可见的时间窗
 static const NSTimeInterval CSVisibilityWindow = 2 * 60 * 60;
+static const NSTimeInterval CSReadWindow = 10 * 60;
+static NSString * const CSReadObservationsKey = @"ReadObservations";
 
 @implementation CSRateBucket
 - (NSInteger)remainingPercent {
@@ -126,11 +128,9 @@ CSActivity CSParseSessionData(NSData *data, NSDate **eventDate) {
 }
 
 BOOL CSVisibleSessionActivity(CSActivity rawActivity, NSDate *lastActivityAt, NSDate *now, CSActivity *visibleActivity) {
-    CSActivity resolved = rawActivity;
-    NSTimeInterval idleDuration = [now timeIntervalSinceDate:lastActivityAt];
-    if (resolved == CSActivityCompleted && idleDuration > 30 * 60) resolved = CSActivityIdle;
-    if (visibleActivity) *visibleActivity = resolved;
-    return resolved != CSActivityIdle || idleDuration <= CSVisibilityWindow;
+    if (visibleActivity) *visibleActivity = rawActivity;
+    return (rawActivity != CSActivityIdle && rawActivity != CSActivityRead) ||
+        [now timeIntervalSinceDate:lastActivityAt] <= CSVisibilityWindow;
 }
 
 CSActivity CSAggregateSessionActivity(NSArray<CSSessionItem *> *sessions) {
@@ -142,6 +142,9 @@ CSActivity CSAggregateSessionActivity(NSArray<CSSessionItem *> *sessions) {
     }
     for (CSSessionItem *session in sessions) {
         if (session.activity == CSActivityCompleted) return CSActivityCompleted;
+    }
+    for (CSSessionItem *session in sessions) {
+        if (session.activity == CSActivityRead) return CSActivityRead;
     }
     return CSActivityIdle;
 }
@@ -208,13 +211,17 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
     NSTimeInterval _databasePathResolvedAt;
 }
 @property(nonatomic) NSMutableDictionary<NSString *, CSSessionCacheEntry *> *stateCache;
+@property(nonatomic) NSDictionary<NSString *, NSDictionary *> *readObservations;
 @end
 
 @implementation CSSessionScanner
 
 - (instancetype)init {
     self = [super init];
-    if (self) _stateCache = [NSMutableDictionary dictionary];
+    if (self) {
+        _stateCache = [NSMutableDictionary dictionary];
+        _readObservations = [NSUserDefaults.standardUserDefaults dictionaryForKey:CSReadObservationsKey] ?: @{};
+    }
     return self;
 }
 
@@ -252,20 +259,15 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
         _databasePath = [path copy];
     }
 
-    // 优先用 INDEXED BY 强制走 (updated_at_ms DESC, id DESC) 索引, 按序取满 100 行即停。
-    // 不指定的话 SQLite 会选低选择度的 idx_threads_archived, 再对 640 行建临时 B 树排序。
-    //
-    // 但索引名是硬依赖: 万一 Codex 迁移 schema 时改名或删掉它, prepare 会直接失败
-    // ("no such index"), 语句为 NULL, 整个任务列表会变成空的。所以准备失败时回退到
-    // 不带 INDEXED BY 的同一条查询 —— 计划可能变差, 但结果始终正确。
+    // 保留索引提示的兼容回退。扫描所有未归档的用户会话，以免遗漏较早完成的未读任务。
     NSString *readTurn = @"(SELECT last_published_turn FROM thread_read_receipts "
         "WHERE thread_id = threads.id AND first_unread_turn IS NULL)";
-    // 老版本没有已读回执表或对应字段时，继续按完成时间显示。
+    // 老版本没有已读回执时，仍可显示已完成任务。
     for (NSString *receipt in @[readTurn, @"NULL"]) {
         for (NSString *indexHint in @[@"INDEXED BY idx_threads_updated_at_ms", @""]) {
             NSString *sql = [NSString stringWithFormat:
                 @"SELECT id, COALESCE(NULLIF(name, ''), NULLIF(title, ''), '未命名任务'), rollout_path, updated_at_ms, %@ "
-                "FROM threads %@ WHERE archived = 0 AND thread_source = 'user' ORDER BY updated_at_ms DESC LIMIT 100",
+                "FROM threads %@ WHERE archived = 0 AND thread_source = 'user' ORDER BY updated_at_ms DESC",
                 receipt, indexHint];
             if (sqlite3_prepare_v2(_database, sql.UTF8String, -1, &_sessionsStatement, NULL) == SQLITE_OK) {
                 return _sessionsStatement;
@@ -289,6 +291,7 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
         sqlite3_clear_bindings(statement);
 
         NSDate *now = NSDate.date;
+        NSMutableDictionary<NSString *, NSDictionary *> *readObservations = [self.readObservations mutableCopy];
         NSMutableArray<CSSessionItem *> *sessions = [NSMutableArray array];
         int stepResult;
         while ((stepResult = sqlite3_step(statement)) == SQLITE_ROW) {
@@ -300,18 +303,22 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
 
             NSDate *updatedAt = [NSDate dateWithTimeIntervalSince1970:updatedSeconds];
 
-            // 这里曾经加过一层"老会话预筛"(缓存中非 Working 且超出可见时间窗就 continue),
-            // 但它优先采用缓存的 eventDate, 会忽略数据库里刚刷新的 updated_at_ms:
-            // 昨天完成的会话今天继续提问时, 数据库时间已更新, 预筛仍按昨天的缓存时间判定
-            // 超出可见时间窗而跳过, 且每轮都跳 —— 该会话会被永久跳过, 完成提醒也随之丢失。
-            // 换成裸 stat() 之后, 不预筛的代价只有每轮约 100 次 stat (约 0.1ms),
-            // 收益微乎其微, 所以直接去掉, 完全恢复原本的可见性语义。
+            // 先读取会话状态。完成时间较早的任务也可能未读，或刚刚启动了新一轮。
             CSSessionCacheEntry *state = [self stateForRolloutPath:rolloutPath];
             NSDate *lastActivityAt = state.eventDate ?: updatedAt;
             CSActivity activity = state.activity;
             if (activity == CSActivityCompleted && state.completedTurnID.length &&
                 [state.completedTurnID isEqualToString:[self stringAtColumn:4 statement:statement]]) {
-                activity = CSActivityIdle;
+                // 旧回执只有已读状态。活动已过期时，不能用首次检测时间重新显示。
+                if (!CSVisibleSessionActivity(CSActivityRead, lastActivityAt, now, NULL)) continue;
+                NSDictionary *observation = readObservations[threadID];
+                NSDate *readAt = [observation[@"turnID"] isEqualToString:state.completedTurnID] ? observation[@"firstSeenAt"] : nil;
+                // 回执没有时间戳。保留本轮首次已读时间，避免旧结果重新进入已读。
+                if (!readAt) {
+                    readAt = now;
+                    readObservations[threadID] = @{@"turnID": state.completedTurnID, @"firstSeenAt": readAt};
+                }
+                activity = [now timeIntervalSinceDate:readAt] < CSReadWindow ? CSActivityRead : CSActivityIdle;
             }
             CSActivity visibleActivity;
             if (!CSVisibleSessionActivity(activity, lastActivityAt, now, &visibleActivity)) continue;
@@ -326,6 +333,10 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
         }
 
         if (stepResult == SQLITE_DONE) {
+            if (![readObservations isEqualToDictionary:self.readObservations]) {
+                self.readObservations = readObservations;
+                [NSUserDefaults.standardUserDefaults setObject:readObservations forKey:CSReadObservationsKey];
+            }
             // 语句保留复用, 不做 finalize; 连接也不关
             [sessions sortUsingComparator:^NSComparisonResult(CSSessionItem *left, CSSessionItem *right) {
                 NSInteger leftRank = [self rankForActivity:left.activity];
@@ -352,7 +363,7 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
     // 用裸 stat() 取文件大小。
     // 注意: 不能用 [NSFileManager attributesOfItemAtPath:] —— 采样显示它会顺带
     // 调用 getxattr / listxattr 和 __getattrlist 去读扩展属性和一整组属性, 每次约 50µs;
-    // 裸 stat 只要约 1µs。每 3 秒要对最多 100 个文件做这件事, 差距非常明显。
+    // 裸 stat 只要约 1µs。
     struct stat fileInfo;
     if (stat(path.fileSystemRepresentation, &fileInfo) != 0)
         return cached ?: [CSSessionCacheEntry new];
@@ -446,7 +457,8 @@ CSRateSnapshot *CSMergeRateSnapshots(CSRateSnapshot *previous, CSRateSnapshot *u
     if (activity == CSActivityWaitingForInput) return -1;
     if (activity == CSActivityWorking) return 0;
     if (activity == CSActivityCompleted) return 1;
-    return 2;
+    if (activity == CSActivityRead) return 2;
+    return 3;
 }
 
 @end

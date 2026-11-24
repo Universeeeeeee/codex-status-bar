@@ -490,6 +490,7 @@ static const CGFloat CSMenuWidth = 440;
 - (void)render {
     NSInteger workingCount = [self countForActivity:CSActivityWorking];
     NSInteger completedCount = [self countForActivity:CSActivityCompleted];
+    NSInteger readCount = [self countForActivity:CSActivityRead];
     NSInteger idleCount = [self countForActivity:CSActivityIdle];
     NSInteger waitingCount = [self countForActivity:CSActivityWaitingForInput];
     self.activity = CSAggregateSessionActivity(self.sessions);
@@ -498,8 +499,8 @@ static const CGFloat CSMenuWidth = 440;
     NSString *weekly = self.rateLimits.weekly ? [NSString stringWithFormat:@"%ld%%", self.rateLimits.weekly.remainingPercent] : @"--";
 
     NSString *taskSummary;
-    if (workingCount || completedCount || waitingCount) {
-        taskSummary = [NSString stringWithFormat:@"待回复 %ld · 开发 %ld · 完成 %ld", waitingCount, workingCount, completedCount];
+    if (workingCount || completedCount || waitingCount || readCount) {
+        taskSummary = [NSString stringWithFormat:@"待回复 %ld · 开发 %ld · 完成 %ld · 已读 %ld", waitingCount, workingCount, completedCount, readCount];
     } else {
         taskSummary = @"闲置";
     }
@@ -517,7 +518,7 @@ static const CGFloat CSMenuWidth = 440;
             [weakSelf updateMenuBarTruncationWarning];
         });
     }
-    NSString *summary = [NSString stringWithFormat:@"待回复 %ld · 开发中 %ld · 已完成 %ld · 闲置 %ld", waitingCount, workingCount, completedCount, idleCount];
+    NSString *summary = [NSString stringWithFormat:@"待回复 %ld · 开发中 %ld · 已完成 %ld · 已读 %ld · 闲置 %ld", waitingCount, workingCount, completedCount, readCount, idleCount];
     self.statusMenuItem.title = [NSString stringWithFormat:@"任务：%@", summary];
     [self.statusHeaderView updateStatus:@"任务" title:summary symbolName:symbol color:[self colorForActivity:self.activity]];
     [self renderTaskItems];
@@ -595,6 +596,7 @@ static const CGFloat CSMenuWidth = 440;
     if (activity == CSActivityWaitingForInput) return @"等待回复";
     if (activity == CSActivityWorking) return @"开发中";
     if (activity == CSActivityCompleted) return @"已完成";
+    if (activity == CSActivityRead) return @"已读";
     return @"闲置";
 }
 
@@ -602,6 +604,7 @@ static const CGFloat CSMenuWidth = 440;
     if (activity == CSActivityWaitingForInput) return NSColor.systemOrangeColor;
     if (activity == CSActivityWorking) return NSColor.controlAccentColor;
     if (activity == CSActivityCompleted) return NSColor.systemGreenColor;
+    if (activity == CSActivityRead) return NSColor.systemTealColor;
     return NSColor.secondaryLabelColor;
 }
 
@@ -609,6 +612,7 @@ static const CGFloat CSMenuWidth = 440;
     if (activity == CSActivityWaitingForInput) return @"questionmark.bubble.fill";
     if (activity == CSActivityWorking) return @"hammer.fill";
     if (activity == CSActivityCompleted) return @"checkmark.circle.fill";
+    if (activity == CSActivityRead) return @"eye";
     return @"circle";
 }
 

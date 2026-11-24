@@ -7,6 +7,7 @@ typedef NS_ENUM(NSInteger, CSActivity) {
     CSActivityWorking,
     CSActivityCompleted,
     CSActivityWaitingForInput,
+    CSActivityRead,
 };
 
 @interface CSRateBucket : NSObject
